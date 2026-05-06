@@ -1030,8 +1030,11 @@ def _build_pdf(event: dict) -> bytes:
                         story.append(Paragraph(f"&nbsp;&nbsp;• <font face='Courier' size=9 color='#b45309'>{u['reference']}</font>",
                                                ParagraphStyle("ul", parent=body, fontSize=10, leftIndent=12)))
                         for s in u.get("subitems", []):
-                            extra = f" <font color='#b45309' face='Courier' size=8>[{s.get('unit_reference')}]</font>" if s.get("unit_reference") else ""
-                            story.append(Paragraph(f"↳ {s['name']}{extra} <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
+                            if s.get("type") == "unit":
+                                ref = s.get("unit_reference") or ""
+                                story.append(Paragraph(f"↳ <font face='Courier' color='#b45309'>({ref})</font> [{s.get('name','')}] <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
+                            else:
+                                story.append(Paragraph(f"↳ {s.get('name','')} <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
 
     rentals = event.get("rentals", [])
     if rentals:

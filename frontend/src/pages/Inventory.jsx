@@ -26,6 +26,7 @@ export default function Inventory() {
   const [editingUnit, setEditingUnit] = useState(null);
   const [unitForm, setUnitForm] = useState({ reference: "", subitems: [], notes: "" });
   const [allUnits, setAllUnits] = useState([]);
+  const [allMaterials, setAllMaterials] = useState([]);
   const [expanded, setExpanded] = useState({});
 
   const load = async () => {
@@ -36,6 +37,8 @@ export default function Inventory() {
     setMaterials(r.data);
     const all = await api.get("/units");
     setAllUnits(all.data);
+    const allM = await api.get("/materials");
+    setAllMaterials(allM.data);
   };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [cat]);
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q]);
@@ -200,9 +203,10 @@ export default function Inventory() {
                                 {(u.subitems || []).length > 0 && <span><i>incluye:</i> {u.subitems.map((s) => {
                                   if (s.type === "unit" && s.unit_id) {
                                     const subU = allUnits.find((x) => x.id === s.unit_id);
-                                    const subM = subU ? materials.find((mm) => mm.id === subU.material_id) : null;
-                                    const nm = subM?.name || s.name;
-                                    return `${nm} [${s.unit_reference || subU?.reference || ""}]`;
+                                    const subM = subU ? allMaterials.find((mm) => mm.id === subU.material_id) : null;
+                                    const ref = s.unit_reference || subU?.reference || "";
+                                    const nm = subM?.name || (s.name && !s.name.startsWith("(") ? s.name : "");
+                                    return `(${ref}) [${nm}]`;
                                   }
                                   return s.name;
                                 }).join(", ")}</span>}
@@ -269,11 +273,11 @@ export default function Inventory() {
                       value={s.unit_id}
                       onChange={(v) => {
                         const u = allUnits.find((x) => x.id === v);
-                        const m = u ? materials.find((mm) => mm.id === u.material_id) : null;
+                        const m = u ? allMaterials.find((mm) => mm.id === u.material_id) : null;
                         updateSub(i, { unit_id: v, unit_reference: u?.reference || "", name: m?.name || "" });
                       }}
                       options={allUnits.filter((x) => x.id !== editingUnit?.id).map((x) => {
-                        const m = materials.find((mm) => mm.id === x.material_id);
+                        const m = allMaterials.find((mm) => mm.id === x.material_id);
                         return { value: x.id, label: `${x.reference} · ${m?.name || ""}`, sub: x.notes || "", keywords: (m?.name || "") + " " + (m?.category || "") };
                       })}
                     />

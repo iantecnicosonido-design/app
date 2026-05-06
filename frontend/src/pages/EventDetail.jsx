@@ -230,7 +230,10 @@ export default function EventDetail() {
                           • <span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)" }}>{u.reference}</span>
                           {(u.subitems || []).map((s, i) => (
                             <div key={i} style={{ marginLeft: 16, fontStyle: "italic", fontSize: 11, color: "var(--ink-mute)" }}>
-                              ↳ {s.name}{s.unit_reference && <span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)", fontStyle: "normal" }}> [{s.unit_reference}]</span>} <span style={{ fontFamily: "JetBrains Mono, monospace", fontStyle: "normal" }}>x{s.qty}</span>
+                              ↳ {s.type === "unit"
+                                ? <><span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)", fontStyle: "normal" }}>({s.unit_reference || ""})</span> [{s.name}]</>
+                                : s.name}
+                              <span style={{ fontFamily: "JetBrains Mono, monospace", fontStyle: "normal" }}> x{s.qty}</span>
                             </div>
                           ))}
                         </div>
