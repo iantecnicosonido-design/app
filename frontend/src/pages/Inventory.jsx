@@ -197,7 +197,15 @@ export default function Inventory() {
                               <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600, minWidth: 110 }}>{u.reference}</span>
                               <span style={{ background: sb.bg, color: sb.color, fontSize: 10, padding: "2px 8px", borderRadius: 999, fontWeight: 600, letterSpacing: "0.04em" }}>{sb.label}</span>
                               <div style={{ flex: 1, fontSize: 12, color: "var(--ink-mute)" }}>
-                                {(u.subitems || []).length > 0 && <span><i>incluye:</i> {u.subitems.map((s) => `${s.name}${s.unit_reference ? " ["+s.unit_reference+"]" : ""}`).join(", ")}</span>}
+                                {(u.subitems || []).length > 0 && <span><i>incluye:</i> {u.subitems.map((s) => {
+                                  if (s.type === "unit" && s.unit_id) {
+                                    const subU = allUnits.find((x) => x.id === s.unit_id);
+                                    const subM = subU ? materials.find((mm) => mm.id === subU.material_id) : null;
+                                    const nm = subM?.name || s.name;
+                                    return `${nm} [${s.unit_reference || subU?.reference || ""}]`;
+                                  }
+                                  return s.name;
+                                }).join(", ")}</span>}
                                 {u.notes && <span style={{ marginLeft: 8 }}>· {u.notes}</span>}
                               </div>
                               <Button size="icon" variant="ghost" onClick={() => startEditUnit(u)}><Pencil size={12} /></Button>
@@ -257,15 +265,16 @@ export default function Inventory() {
                 <div key={i} style={{ display: "grid", gridTemplateColumns: s.type === "unit" ? "1fr 80px 36px" : "1fr 80px 36px", gap: 8, marginBottom: 8, alignItems: "center" }}>
                   {s.type === "unit" ? (
                     <SearchSelect
-                      placeholder="Buscar unidad por referencia..."
+                      placeholder="Buscar unidad por referencia o nombre..."
                       value={s.unit_id}
                       onChange={(v) => {
                         const u = allUnits.find((x) => x.id === v);
-                        updateSub(i, { unit_id: v, unit_reference: u?.reference || "", name: u ? `(${u.reference})` : "" });
+                        const m = u ? materials.find((mm) => mm.id === u.material_id) : null;
+                        updateSub(i, { unit_id: v, unit_reference: u?.reference || "", name: m?.name || "" });
                       }}
                       options={allUnits.filter((x) => x.id !== editingUnit?.id).map((x) => {
                         const m = materials.find((mm) => mm.id === x.material_id);
-                        return { value: x.id, label: x.reference, sub: m?.name || "", keywords: m?.name || "" };
+                        return { value: x.id, label: `${x.reference} · ${m?.name || ""}`, sub: x.notes || "", keywords: (m?.name || "") + " " + (m?.category || "") };
                       })}
                     />
                   ) : (

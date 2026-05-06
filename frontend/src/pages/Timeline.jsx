@@ -135,7 +135,10 @@ export default function Timeline() {
               placeholder="Buscar unidad..."
               value={filterId}
               onChange={setFilterId}
-              options={units.map((u) => ({ value: u.id, label: u.reference, sub: (materials.find((m) => m.id === u.material_id)?.name) || "", keywords: (materials.find((m) => m.id === u.material_id)?.name) || "" }))}
+              options={units.map((u) => {
+                const m = materials.find((mm) => mm.id === u.material_id);
+                return { value: u.id, label: `${u.reference} · ${m?.name || ""}`, sub: m?.category || "", keywords: m?.name || "" };
+              })}
             />
           )}
           {filterMode === "pack" && (

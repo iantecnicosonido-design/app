@@ -108,7 +108,7 @@ export default function Incidents() {
                 onChange={(v) => setForm({ ...form, unit_id: v })}
                 options={availableUnits.map((u) => {
                   const m = materials.find((x) => x.id === u.material_id);
-                  return { value: u.id, label: u.reference, sub: m?.name || "", keywords: m?.name || "" };
+                  return { value: u.id, label: `${u.reference} · ${m?.name || ""}`, sub: m?.category || "", keywords: m?.name || "" };
                 })}
               />
             </Lbl>

@@ -271,10 +271,12 @@ export default function EventDetail() {
             {!pickedMat ? (
               <div style={{ maxHeight: 300, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
                 {filteredMaterials.map((m) => (
-                  <button key={m.id} onClick={() => setPickedMat(m)} className="row-hover" style={{ display: "grid", gridTemplateColumns: "100px 1fr 80px", padding: "10px 12px", borderBottom: "1px solid var(--line)", alignItems: "center", gap: 8, width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", borderTop: "none", borderLeft: "none", borderRight: "none" }}>
-                    <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{m.reference}</span>
-                    <span style={{ fontSize: 13 }}>{m.name}</span>
-                    <span style={{ fontSize: 11, color: "var(--ink-mute)", textAlign: "right" }}>{m.quantity} unid · {m.category}</span>
+                  <button key={m.id} onClick={() => setPickedMat(m)} className="row-hover" style={{ display: "flex", flexDirection: "column", gap: 2, padding: "10px 14px", borderBottom: "1px solid var(--line)", width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", borderTop: "none", borderLeft: "none", borderRight: "none" }}>
+                    <div style={{ fontSize: 13, fontWeight: 500 }}>
+                      <span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)", fontWeight: 600, marginRight: 8 }}>{m.reference}</span>
+                      {m.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>{m.category} · {m.quantity} unidades</div>
                   </button>
                 ))}
                 {filteredMaterials.length === 0 && <p style={{ padding: 20, color: "var(--ink-mute)", textAlign: "center" }}>Sin resultados</p>}
