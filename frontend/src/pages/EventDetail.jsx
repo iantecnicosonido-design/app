@@ -9,6 +9,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { toast } from "sonner";
 
+const fmtDt = (s) => {
+  if (!s) return "—";
+  try {
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return s;
+    return d.toLocaleString("es-ES", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  } catch { return s; }
+};
+
 export default function EventDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -36,13 +45,14 @@ export default function EventDetail() {
   if (!ev) return <div style={{ padding: 40, color: "var(--ink-mute)" }}>Cargando...</div>;
 
   const isClosed = ev.status === "cerrado";
+  const isBolo = (edit?.type ?? ev.type) === "bolo";
   const editing = edit ?? ev;
 
   const saveEdit = async () => {
+    const fields = ["name","type","client_name","client_contact","reference","location","setup_date","event_date","end_date","schedule","notes",
+      "warehouse_out_dt","return_dt","setup_start_dt","setup_end_dt","act_start_dt","act_end_dt","dismount_start_dt","dismount_end_dt"];
     const payload = {};
-    ["name","type","client_name","reference","location","setup_date","event_date","end_date","schedule","notes"].forEach((k) => {
-      payload[k] = editing[k] ?? "";
-    });
+    fields.forEach((k) => { payload[k] = editing[k] ?? ""; });
     try {
       const r = await api.put(`/events/${id}`, payload);
       setEv(r.data); setEdit(null);
@@ -103,9 +113,7 @@ export default function EventDetail() {
     navigate("/eventos");
   };
 
-  const exportPDF = () => {
-    window.open(`${API}/events/${id}/export`, "_blank");
-  };
+  const exportPDF = () => window.open(`${API}/events/${id}/export`, "_blank");
 
   const grouped = { audio: [], video: [], luces: [], estructuras: [] };
   ev.materials.forEach((m) => grouped[m.category]?.push(m));
@@ -118,7 +126,7 @@ export default function EventDetail() {
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 14, marginBottom: 24 }}>
         <div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
             <h2 className="page-title" style={{ margin: 0 }}>{ev.name}</h2>
             <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11, padding: "3px 10px", borderRadius: 999, background: ev.type === "bolo" ? "#fef3c7" : "#e0e7ff", color: ev.type === "bolo" ? "#92400e" : "#3730a3", textTransform: "uppercase", letterSpacing: "0.08em" }}>{ev.type}</span>
             <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: isClosed ? "#fee2e2" : "#dcfce7", color: isClosed ? "#991b1b" : "#166534", textTransform: "uppercase", letterSpacing: "0.08em" }}>{ev.status}</span>
@@ -136,7 +144,6 @@ export default function EventDetail() {
         </div>
       </div>
 
-      {/* Ficha */}
       <div className="card-paper" style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Ficha del evento</h3>
@@ -145,20 +152,41 @@ export default function EventDetail() {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
           <Info label="Cliente" value={editing.client_name} edit={!!edit} onChange={(v) => setEdit({ ...edit, client_name: v })} />
-          <Info label="Referencia" value={editing.reference} edit={!!edit} onChange={(v) => setEdit({ ...edit, reference: v })} />
+          {!isBolo && <Info label="Contacto cliente" value={editing.client_contact} edit={!!edit} onChange={(v) => setEdit({ ...edit, client_contact: v })} />}
+          <Info label={isBolo ? "Nº referencia" : "Referencia"} value={editing.reference} edit={!!edit} onChange={(v) => setEdit({ ...edit, reference: v })} />
           <Info label="Ubicación" value={editing.location} edit={!!edit} onChange={(v) => setEdit({ ...edit, location: v })} />
           <Info label="Tipo" value={editing.type} edit={!!edit} onChange={(v) => setEdit({ ...edit, type: v })} select={[{v:"alquiler",l:"Alquiler simple"},{v:"bolo",l:"Bolo"}]} display={editing.type === "bolo" ? "Bolo" : "Alquiler simple"} />
-          <Info label="Montaje" value={editing.setup_date} edit={!!edit} onChange={(v) => setEdit({ ...edit, setup_date: v })} type="date" display={formatDate(editing.setup_date)} />
-          <Info label="Fecha acto" value={editing.event_date} edit={!!edit} onChange={(v) => setEdit({ ...edit, event_date: v })} type="date" display={formatDate(editing.event_date)} />
-          <Info label="Fin" value={editing.end_date} edit={!!edit} onChange={(v) => setEdit({ ...edit, end_date: v })} type="date" display={formatDate(editing.end_date)} />
+          <Info label="Fecha acto (resumen)" value={editing.event_date} edit={!!edit} onChange={(v) => setEdit({ ...edit, event_date: v })} type="date" display={formatDate(editing.event_date)} />
           <Info label="Horarios" value={editing.schedule} edit={!!edit} onChange={(v) => setEdit({ ...edit, schedule: v })} />
         </div>
+
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1px dashed var(--line)" }}>
+          <div style={{ fontSize: 11, color: "var(--ink-mute)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "JetBrains Mono, monospace", marginBottom: 12 }}>{isBolo ? "Cronograma del bolo · ventana de bloqueo" : "Salida y retorno · ventana de bloqueo"}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+            {isBolo ? (
+              <>
+                <Info label="Salida nave" value={editing.warehouse_out_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, warehouse_out_dt: v })} type="datetime-local" display={fmtDt(editing.warehouse_out_dt)} />
+                <Info label="Inicio montaje" value={editing.setup_start_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, setup_start_dt: v })} type="datetime-local" display={fmtDt(editing.setup_start_dt)} />
+                <Info label="Fin montaje" value={editing.setup_end_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, setup_end_dt: v })} type="datetime-local" display={fmtDt(editing.setup_end_dt)} />
+                <Info label="Inicio acto" value={editing.act_start_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, act_start_dt: v })} type="datetime-local" display={fmtDt(editing.act_start_dt)} />
+                <Info label="Fin acto" value={editing.act_end_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, act_end_dt: v })} type="datetime-local" display={fmtDt(editing.act_end_dt)} />
+                <Info label="Inicio desmontaje" value={editing.dismount_start_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, dismount_start_dt: v })} type="datetime-local" display={fmtDt(editing.dismount_start_dt)} />
+                <Info label="Fin desmontaje" value={editing.dismount_end_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, dismount_end_dt: v })} type="datetime-local" display={fmtDt(editing.dismount_end_dt)} />
+              </>
+            ) : (
+              <>
+                <Info label="Salida nave" value={editing.warehouse_out_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, warehouse_out_dt: v })} type="datetime-local" display={fmtDt(editing.warehouse_out_dt)} />
+                <Info label="Retorno" value={editing.return_dt} edit={!!edit} onChange={(v) => setEdit({ ...edit, return_dt: v })} type="datetime-local" display={fmtDt(editing.return_dt)} />
+              </>
+            )}
+          </div>
+        </div>
+
         <div style={{ marginTop: 14 }}>
           <Info label="Notas" full value={editing.notes} edit={!!edit} onChange={(v) => setEdit({ ...edit, notes: v })} multi />
         </div>
       </div>
 
-      {/* Material bloqueado */}
       <div className="card-paper" style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material bloqueado del stock</h3>
@@ -172,12 +200,20 @@ export default function EventDetail() {
               <div key={c.key} style={{ marginBottom: 14 }}>
                 <div style={{ marginBottom: 8 }}><span className={`cat-pill cat-${c.key}`}>{c.label}</span></div>
                 {grouped[c.key].map((m) => (
-                  <div key={m.material_id} className="row-hover" style={{ display: "grid", gridTemplateColumns: "1fr 80px 60px", padding: "10px 4px", borderBottom: "1px solid var(--line)", alignItems: "center" }}>
-                    <div>{m.name}</div>
-                    <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--ink-soft)" }}>x{m.quantity}</div>
-                    <div style={{ textAlign: "right" }}>
-                      {!isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)} data-testid={`unblock-${m.material_id}`}><Trash2 size={14} /></Button>}
+                  <div key={m.material_id} style={{ borderBottom: "1px solid var(--line)" }}>
+                    <div className="row-hover" style={{ display: "grid", gridTemplateColumns: "100px 1fr 80px 60px", padding: "10px 4px", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{m.reference || "—"}</span>
+                      <div>{m.name}</div>
+                      <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--ink-soft)" }}>x{m.quantity}</div>
+                      <div style={{ textAlign: "right" }}>
+                        {!isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)} data-testid={`unblock-${m.material_id}`}><Trash2 size={14} /></Button>}
+                      </div>
                     </div>
+                    {(m.subitems || []).map((s, i) => (
+                      <div key={i} style={{ padding: "4px 4px 4px 110px", fontSize: 12, color: "var(--ink-mute)", fontStyle: "italic" }}>
+                        ↳ {s.name} <span style={{ fontFamily: "JetBrains Mono, monospace", fontStyle: "normal" }}>x{s.qty}</span>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
@@ -186,7 +222,6 @@ export default function EventDetail() {
         )}
       </div>
 
-      {/* Alquiler externo */}
       <div className="card-paper">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material de alquiler externo</h3>
@@ -208,7 +243,6 @@ export default function EventDetail() {
         )}
       </div>
 
-      {/* Block material dialog */}
       <Dialog open={matOpen} onOpenChange={setMatOpen}>
         <DialogContent data-testid="block-material-dialog">
           <DialogHeader><DialogTitle>Bloquear material del stock</DialogTitle></DialogHeader>
@@ -225,7 +259,7 @@ export default function EventDetail() {
                 <SelectContent>
                   {filteredMaterials.map((m) => {
                     const av = m.quantity - (m.blocked || 0);
-                    return <SelectItem key={m.id} value={m.id} disabled={av < 1}>{m.name} (disp: {av})</SelectItem>;
+                    return <SelectItem key={m.id} value={m.id}>{m.reference} · {m.name} (disp: {av})</SelectItem>;
                   })}
                 </SelectContent>
               </Select>
@@ -233,6 +267,7 @@ export default function EventDetail() {
             <FieldLabel label="Cantidad">
               <Input type="number" min={1} data-testid="block-quantity" value={matForm.quantity} onChange={(e) => setMatForm({ ...matForm, quantity: parseInt(e.target.value || "1") })} />
             </FieldLabel>
+            <p style={{ fontSize: 11, color: "var(--ink-mute)", margin: 0 }}>El sistema valida solapamientos por fecha/hora con otros eventos.</p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setMatOpen(false)}>Cancelar</Button>
@@ -241,17 +276,12 @@ export default function EventDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Rental dialog */}
       <Dialog open={rentOpen} onOpenChange={setRentOpen}>
         <DialogContent data-testid="rental-dialog">
           <DialogHeader><DialogTitle>Material de alquiler externo</DialogTitle></DialogHeader>
           <div style={{ display: "grid", gap: 12 }}>
-            <FieldLabel label="Material">
-              <Input data-testid="rental-name" value={rentForm.name} onChange={(e) => setRentForm({ ...rentForm, name: e.target.value })} />
-            </FieldLabel>
-            <FieldLabel label="Cantidad">
-              <Input type="number" min={1} data-testid="rental-qty" value={rentForm.quantity} onChange={(e) => setRentForm({ ...rentForm, quantity: parseInt(e.target.value || "1") })} />
-            </FieldLabel>
+            <FieldLabel label="Material"><Input data-testid="rental-name" value={rentForm.name} onChange={(e) => setRentForm({ ...rentForm, name: e.target.value })} /></FieldLabel>
+            <FieldLabel label="Cantidad"><Input type="number" min={1} data-testid="rental-qty" value={rentForm.quantity} onChange={(e) => setRentForm({ ...rentForm, quantity: parseInt(e.target.value || "1") })} /></FieldLabel>
             <FieldLabel label="Empresa proveedora">
               <Select value={rentForm.provider_id || "none"} onValueChange={(v) => setRentForm({ ...rentForm, provider_id: v === "none" ? "" : v })}>
                 <SelectTrigger data-testid="rental-provider"><SelectValue placeholder="Sin empresa..." /></SelectTrigger>
@@ -262,9 +292,7 @@ export default function EventDetail() {
               </Select>
               {providers.length === 0 && <p style={{ fontSize: 11, color: "var(--ink-mute)", marginTop: 6 }}>Crea proveedores en <Link to="/proveedores" className="subtle-link">Proveedores</Link>.</p>}
             </FieldLabel>
-            <FieldLabel label="Notas">
-              <Textarea rows={2} data-testid="rental-notes" value={rentForm.notes} onChange={(e) => setRentForm({ ...rentForm, notes: e.target.value })} />
-            </FieldLabel>
+            <FieldLabel label="Notas"><Textarea rows={2} data-testid="rental-notes" value={rentForm.notes} onChange={(e) => setRentForm({ ...rentForm, notes: e.target.value })} /></FieldLabel>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRentOpen(false)}>Cancelar</Button>

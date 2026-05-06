@@ -12,9 +12,12 @@ import { Calendar } from "../components/ui/calendar";
 import { toast } from "sonner";
 
 const empty = {
-  name: "", type: "alquiler", client_name: "", reference: "",
+  name: "", type: "alquiler", client_name: "", client_contact: "", reference: "",
   location: "", setup_date: "", event_date: "", end_date: "",
   schedule: "", notes: "",
+  warehouse_out_dt: "", return_dt: "",
+  setup_start_dt: "", setup_end_dt: "", act_start_dt: "", act_end_dt: "",
+  dismount_start_dt: "", dismount_end_dt: "",
 };
 
 export default function Events() {
@@ -43,6 +46,8 @@ export default function Events() {
   const eventDates = events
     .filter((e) => e.event_date)
     .map((e) => new Date(e.event_date));
+
+  const isBolo = form.type === "bolo";
 
   return (
     <div data-testid="events-page">
@@ -94,19 +99,14 @@ export default function Events() {
 
         <TabsContent value="cal">
           <div className="card-paper" style={{ display: "flex", justifyContent: "center" }}>
-            <Calendar
-              mode="multiple"
-              selected={eventDates}
-              numberOfMonths={2}
-              data-testid="event-calendar"
-            />
+            <Calendar mode="multiple" selected={eventDates} numberOfMonths={2} />
           </div>
           <div style={{ marginTop: 14, color: "var(--ink-mute)", fontSize: 13 }}>Días marcados = eventos programados.</div>
         </TabsContent>
       </Tabs>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent style={{ maxWidth: 640 }} data-testid="event-dialog">
+        <DialogContent style={{ maxWidth: 760, maxHeight: "92vh", overflowY: "auto" }} data-testid="event-dialog">
           <DialogHeader><DialogTitle>Nuevo evento</DialogTitle></DialogHeader>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field label="Nombre" required>
@@ -122,12 +122,42 @@ export default function Events() {
               </Select>
             </Field>
             <Field label="Cliente"><Input data-testid="event-client" value={form.client_name} onChange={(e) => setForm({ ...form, client_name: e.target.value })} /></Field>
-            <Field label="Nº de referencia (bolo)"><Input data-testid="event-ref" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} /></Field>
+            <Field label={isBolo ? "Nº referencia (bolo)" : "Contacto cliente"}>
+              {isBolo ? (
+                <Input data-testid="event-ref" value={form.reference} onChange={(e) => setForm({ ...form, reference: e.target.value })} />
+              ) : (
+                <Input data-testid="event-contact" placeholder="Tlf / email" value={form.client_contact} onChange={(e) => setForm({ ...form, client_contact: e.target.value })} />
+              )}
+            </Field>
             <Field label="Ubicación" full><Input data-testid="event-location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
-            <Field label="Fecha montaje"><Input type="date" data-testid="event-setup" value={form.setup_date || ""} onChange={(e) => setForm({ ...form, setup_date: e.target.value })} /></Field>
-            <Field label="Fecha acto"><Input type="date" data-testid="event-date" value={form.event_date || ""} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></Field>
-            <Field label="Fecha fin"><Input type="date" data-testid="event-end" value={form.end_date || ""} onChange={(e) => setForm({ ...form, end_date: e.target.value })} /></Field>
-            <Field label="Horarios"><Input data-testid="event-schedule" placeholder="Ej: Montaje 10h · Acto 20h" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} /></Field>
+
+            <div style={{ gridColumn: "1 / -1", marginTop: 6, paddingTop: 10, borderTop: "1px dashed var(--line)" }}>
+              <div style={{ fontSize: 11, color: "var(--ink-mute)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "JetBrains Mono, monospace", marginBottom: 8 }}>
+                {isBolo ? "Cronograma del bolo" : "Salida y retorno"}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                {isBolo ? (
+                  <>
+                    <Field label="Salida nave"><Input type="datetime-local" data-testid="event-out" value={form.warehouse_out_dt} onChange={(e) => setForm({ ...form, warehouse_out_dt: e.target.value })} /></Field>
+                    <Field label="Fecha acto (resumen)"><Input type="date" data-testid="event-date" value={form.event_date || ""} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></Field>
+                    <Field label="Inicio montaje"><Input type="datetime-local" data-testid="event-setup-start" value={form.setup_start_dt} onChange={(e) => setForm({ ...form, setup_start_dt: e.target.value })} /></Field>
+                    <Field label="Fin montaje"><Input type="datetime-local" data-testid="event-setup-end" value={form.setup_end_dt} onChange={(e) => setForm({ ...form, setup_end_dt: e.target.value })} /></Field>
+                    <Field label="Inicio acto"><Input type="datetime-local" data-testid="event-act-start" value={form.act_start_dt} onChange={(e) => setForm({ ...form, act_start_dt: e.target.value })} /></Field>
+                    <Field label="Fin acto"><Input type="datetime-local" data-testid="event-act-end" value={form.act_end_dt} onChange={(e) => setForm({ ...form, act_end_dt: e.target.value })} /></Field>
+                    <Field label="Inicio desmontaje"><Input type="datetime-local" data-testid="event-dis-start" value={form.dismount_start_dt} onChange={(e) => setForm({ ...form, dismount_start_dt: e.target.value })} /></Field>
+                    <Field label="Fin desmontaje"><Input type="datetime-local" data-testid="event-dis-end" value={form.dismount_end_dt} onChange={(e) => setForm({ ...form, dismount_end_dt: e.target.value })} /></Field>
+                  </>
+                ) : (
+                  <>
+                    <Field label="Salida nave"><Input type="datetime-local" data-testid="event-out" value={form.warehouse_out_dt} onChange={(e) => setForm({ ...form, warehouse_out_dt: e.target.value })} /></Field>
+                    <Field label="Retorno"><Input type="datetime-local" data-testid="event-return" value={form.return_dt} onChange={(e) => setForm({ ...form, return_dt: e.target.value })} /></Field>
+                    <Field label="Fecha acto (resumen)"><Input type="date" data-testid="event-date" value={form.event_date || ""} onChange={(e) => setForm({ ...form, event_date: e.target.value })} /></Field>
+                  </>
+                )}
+              </div>
+            </div>
+
+            <Field label="Horarios libres" full><Input data-testid="event-schedule" placeholder="Ej: Montaje 10h · Acto 20h" value={form.schedule} onChange={(e) => setForm({ ...form, schedule: e.target.value })} /></Field>
             <Field label="Notas" full><Textarea data-testid="event-notes" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></Field>
           </div>
           <DialogFooter>
