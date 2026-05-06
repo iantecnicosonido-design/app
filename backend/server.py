@@ -19,6 +19,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.utils import ImageReader
 
 
 ROOT_DIR = Path(__file__).parent
@@ -78,13 +79,45 @@ def get_object(path: str):
 
 
 # ---------- Constants ----------
-Category = Literal["audio", "video", "luces", "estructuras"]
+Category = str
 EventType = Literal["alquiler", "bolo"]
 EventStatus = Literal["abierto", "cerrado"]
 UnitStatus = Literal["available", "broken", "repair"]
 
-CAT_PREFIX = {"audio": "AUD", "video": "VID", "luces": "LUC", "estructuras": "EST"}
+DEFAULT_CATEGORIES = [
+    {"key": "audio", "label": "Audio", "prefix": "AUD", "has_subitems": True, "has_unit_refs": True, "order": 1},
+    {"key": "video", "label": "Video", "prefix": "VID", "has_subitems": True, "has_unit_refs": True, "order": 2},
+    {"key": "luces", "label": "Luces", "prefix": "LUC", "has_subitems": True, "has_unit_refs": True, "order": 3},
+    {"key": "estructuras", "label": "Estructuras", "prefix": "EST", "has_subitems": True, "has_unit_refs": True, "order": 4},
+    {"key": "cables", "label": "Cables", "prefix": "CAB", "has_subitems": False, "has_unit_refs": False, "order": 5},
+]
 PROJ = {"_id": 0}
+
+
+class CategoryModel(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    key: str
+    label: str
+    prefix: str
+    has_subitems: bool = True
+    has_unit_refs: bool = True
+    order: int = 100
+
+
+class CategoryCreate(BaseModel):
+    key: str
+    label: str
+    prefix: str
+    has_subitems: bool = True
+    has_unit_refs: bool = True
+
+
+class CategoryUpdate(BaseModel):
+    label: Optional[str] = None
+    prefix: Optional[str] = None
+    has_subitems: Optional[bool] = None
+    has_unit_refs: Optional[bool] = None
+    order: Optional[int] = None
 
 
 # ---------- Models ----------
@@ -290,8 +323,14 @@ class PackCreate(BaseModel):
 
 
 # ---------- Helpers ----------
+async def get_category(key: str) -> dict:
+    cat = await db.categories.find_one({"key": key}, PROJ)
+    return cat or {"key": key, "prefix": "REF", "has_subitems": True, "has_unit_refs": True, "label": key}
+
+
 async def next_base_reference(category: str) -> str:
-    prefix = CAT_PREFIX.get(category, "REF")
+    cat = await get_category(category)
+    prefix = cat.get("prefix", "REF")
     cursor = db.materials.find({"category": category, "reference": {"$regex": f"^{prefix}-"}}, {"reference": 1, "_id": 0})
     max_n = 0
     async for d in cursor:
@@ -305,14 +344,12 @@ async def next_base_reference(category: str) -> str:
 
 
 async def create_units_for_material(material: dict, count: int, start_seq: int = 1):
+    cat = await get_category(material["category"])
+    has_unit_refs = cat.get("has_unit_refs", True)
     docs = []
     for i in range(start_seq, start_seq + count):
-        u = MaterialUnit(
-            material_id=material["id"],
-            reference=f"{material['reference']}-{i:02d}",
-            seq=i,
-            status="available",
-        )
+        ref = f"{material['reference']}-{i:02d}" if has_unit_refs else material["reference"]
+        u = MaterialUnit(material_id=material["id"], reference=ref, seq=i, status="available")
         docs.append(u.model_dump())
     if docs:
         await db.units.insert_many(docs)
@@ -376,6 +413,13 @@ async def material_blocked_count(material_id: str) -> int:
 
 # ---------- Migration / Seed ----------
 async def seed_and_migrate():
+    # 0. seed categories if empty
+    if await db.categories.count_documents({}) == 0:
+        await db.categories.insert_many([CategoryModel(**c).model_dump() for c in DEFAULT_CATEGORIES])
+    # ensure cables category exists
+    if not await db.categories.find_one({"key": "cables"}):
+        await db.categories.insert_one(CategoryModel(**{"key": "cables", "label": "Cables", "prefix": "CAB", "has_subitems": False, "has_unit_refs": False, "order": 5}).model_dump())
+
     # 1. seed materials if empty
     if await db.materials.count_documents({}) == 0:
         seed_path = ROOT_DIR / "seed_inventory.json"
@@ -386,7 +430,8 @@ async def seed_and_migrate():
             for it in items:
                 cat = it["category"]
                 counters[cat] = counters.get(cat, 0) + 1
-                ref = f"{CAT_PREFIX.get(cat, 'REF')}-{counters[cat]:04d}"
+                cat_doc = await get_category(cat)
+                ref = f"{cat_doc.get('prefix','REF')}-{counters[cat]:04d}"
                 m = Material(category=cat, name=it["name"], quantity=int(it["quantity"]), reference=ref)
                 await db.materials.insert_one(m.model_dump())
 
@@ -396,15 +441,61 @@ async def seed_and_migrate():
         ref = await next_base_reference(d["category"])
         await db.materials.update_one({"id": d["id"]}, {"$set": {"reference": ref}})
 
-    # 3. create unit docs for each material if missing
+    # 3. migrate "cable" materials → cables category (one-time)
+    import re
+    cab_re = re.compile(r"\bcable\b", re.IGNORECASE)
+    async for m in db.materials.find({"category": {"$ne": "cables"}}, PROJ):
+        if cab_re.search(m["name"]):
+            new_ref = await next_base_reference("cables")
+            await db.materials.update_one({"id": m["id"]}, {"$set": {"category": "cables", "reference": new_ref}})
+            # update unit refs (for cables, single ref no -NN)
+            await db.units.update_many({"material_id": m["id"]}, {"$set": {"reference": new_ref}})
+
+    # 4. create unit docs for each material if missing
     async for m in db.materials.find({}, PROJ):
         existing = await db.units.count_documents({"material_id": m["id"]})
         target = m.get("quantity", 0)
         if existing < target:
             await create_units_for_material(m, target - existing, start_seq=existing + 1)
 
-    # 4. clear deprecated 'subitems' on materials (template moved to per-unit)
+    # 5. clear deprecated 'subitems' on materials
     await db.materials.update_many({"subitems": {"$exists": True}}, {"$unset": {"subitems": ""}})
+
+
+# ---------- Categories ----------
+@api_router.get("/categories")
+async def list_categories():
+    return await db.categories.find({}, PROJ).sort("order", 1).to_list(200)
+
+
+@api_router.post("/categories", response_model=CategoryModel)
+async def create_category(payload: CategoryCreate):
+    if await db.categories.find_one({"key": payload.key}):
+        raise HTTPException(400, "Esta clave ya existe")
+    last = await db.categories.find({}, PROJ).sort("order", -1).limit(1).to_list(1)
+    order = (last[0]["order"] if last else 0) + 1
+    c = CategoryModel(**payload.model_dump(), order=order)
+    await db.categories.insert_one(c.model_dump())
+    return c
+
+
+@api_router.put("/categories/{key}")
+async def update_category(key: str, payload: CategoryUpdate):
+    update = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not update:
+        raise HTTPException(400, "Sin cambios")
+    res = await db.categories.find_one_and_update({"key": key}, {"$set": update}, return_document=True, projection=PROJ)
+    if not res:
+        raise HTTPException(404, "Categoría no encontrada")
+    return res
+
+
+@api_router.delete("/categories/{key}")
+async def delete_category(key: str):
+    if await db.materials.count_documents({"category": key}) > 0:
+        raise HTTPException(400, "Hay materiales en esta categoría. Muévelos primero.")
+    await db.categories.delete_one({"key": key})
+    return {"ok": True}
 
 
 # ---------- Materials & Units ----------
@@ -945,7 +1036,8 @@ def _fmt_dt(s):
     return d.strftime("%d/%m/%Y %H:%M") if "T" in str(s) else d.strftime("%d/%m/%Y")
 
 
-def _build_pdf(event: dict) -> bytes:
+def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
+    subitem_name_map = subitem_name_map or {}
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,
                             topMargin=1.5 * cm, bottomMargin=2 * cm,
@@ -960,7 +1052,16 @@ def _build_pdf(event: dict) -> bytes:
 
     if LOGO_PATH.exists():
         try:
-            logo = Image(str(LOGO_PATH), width=3 * cm, height=3 * cm)
+            ir = ImageReader(str(LOGO_PATH))
+            iw, ih = ir.getSize()
+            aspect = ih / iw
+            target_w = 4 * cm
+            target_h = target_w * aspect
+            max_h = 2 * cm
+            if target_h > max_h:
+                target_h = max_h
+                target_w = target_h / aspect
+            logo = Image(str(LOGO_PATH), width=target_w, height=target_h)
             logo.hAlign = "LEFT"
             type_label = "BOLO" if event.get("type") == "bolo" else "ALQUILER"
             status_label = "Cerrado" if event.get("status") == "cerrado" else "Abierto"
@@ -968,7 +1069,7 @@ def _build_pdf(event: dict) -> bytes:
                 f"<b>{event.get('name','Evento')}</b><br/><font size=9 color='#78716c'>{type_label} · {status_label}</font>",
                 ParagraphStyle("hr", parent=body, fontSize=14, alignment=2)
             )
-            head_tbl = Table([[logo, head_right]], colWidths=[3.5 * cm, 13 * cm])
+            head_tbl = Table([[logo, head_right]], colWidths=[4.5 * cm, 12 * cm])
             head_tbl.setStyle(TableStyle([
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor("#1c1917")),
@@ -1017,24 +1118,30 @@ def _build_pdf(event: dict) -> bytes:
         by_cat: Dict[str, List[dict]] = {}
         for m in materials:
             by_cat.setdefault(m["category"], []).append(m)
-        for cat in ["audio", "video", "luces", "estructuras"]:
+        cat_order = subitem_name_map.get("__cat_order__") or list(by_cat.keys())
+        for cat in cat_order:
             if cat in by_cat:
-                story.append(Paragraph(cat.capitalize(), ParagraphStyle(
+                cat_label = subitem_name_map.get(f"__cat_label__{cat}", cat.capitalize())
+                cat_has_unit_refs = subitem_name_map.get(f"__cat_unit_refs__{cat}", True)
+                story.append(Paragraph(cat_label, ParagraphStyle(
                     "cat", parent=body, fontSize=11, textColor=colors.HexColor("#111827"),
                     spaceBefore=4, spaceAfter=2, fontName="Helvetica-Bold")))
                 for m in sorted(by_cat[cat], key=lambda x: x.get("reference") or x["name"]):
                     units = m.get("units", [])
                     head = f"<b>{m.get('reference','') + ' · ' if m.get('reference') else ''}{m['name']}</b> &nbsp;<font color='#78716c'>x{len(units)}</font>"
                     story.append(Paragraph(head, ParagraphStyle("ml", parent=body, fontSize=10, spaceBefore=3, spaceAfter=1)))
-                    for u in units:
-                        story.append(Paragraph(f"&nbsp;&nbsp;• <font face='Courier' size=9 color='#b45309'>{u['reference']}</font>",
-                                               ParagraphStyle("ul", parent=body, fontSize=10, leftIndent=12)))
-                        for s in u.get("subitems", []):
-                            if s.get("type") == "unit":
-                                ref = s.get("unit_reference") or ""
-                                story.append(Paragraph(f"↳ <font face='Courier' color='#b45309'>({ref})</font> [{s.get('name','')}] <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
-                            else:
-                                story.append(Paragraph(f"↳ {s.get('name','')} <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
+                    if cat_has_unit_refs:
+                        for u in units:
+                            story.append(Paragraph(f"&nbsp;&nbsp;• <font face='Courier' size=9 color='#b45309'>{u['reference']}</font>",
+                                                   ParagraphStyle("ul", parent=body, fontSize=10, leftIndent=12)))
+                            for s in u.get("subitems", []):
+                                if s.get("type") == "unit":
+                                    ref = s.get("unit_reference") or ""
+                                    stored = s.get("name", "")
+                                    resolved = subitem_name_map.get(s.get("unit_id"), stored if stored and not stored.startswith("(") else "")
+                                    story.append(Paragraph(f"↳ <font face='Courier' color='#b45309'>({ref})</font> [{resolved}] <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
+                                else:
+                                    story.append(Paragraph(f"↳ {s.get('name','')} <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
 
     rentals = event.get("rentals", [])
     if rentals:
@@ -1090,7 +1197,30 @@ async def export_event_pdf(eid: str):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
-    pdf_bytes = _build_pdf(ev)
+    # build subitem name map: unit_id -> material name
+    sub_unit_ids = set()
+    for em in ev.get("materials", []):
+        for u in em.get("units", []):
+            for s in u.get("subitems", []):
+                if s.get("type") == "unit" and s.get("unit_id"):
+                    sub_unit_ids.add(s["unit_id"])
+    name_map = {}
+    if sub_unit_ids:
+        sub_units = await db.units.find({"id": {"$in": list(sub_unit_ids)}}, PROJ).to_list(5000)
+        sub_mat_ids = list({u["material_id"] for u in sub_units})
+        sub_mats = await db.materials.find({"id": {"$in": sub_mat_ids}}, PROJ).to_list(5000)
+        mat_by_id = {m["id"]: m for m in sub_mats}
+        for u in sub_units:
+            m = mat_by_id.get(u["material_id"])
+            if m:
+                name_map[u["id"]] = m["name"]
+    # add category metadata
+    cats = await db.categories.find({}, PROJ).sort("order", 1).to_list(200)
+    name_map["__cat_order__"] = [c["key"] for c in cats]
+    for c in cats:
+        name_map[f"__cat_label__{c['key']}"] = c["label"]
+        name_map[f"__cat_unit_refs__{c['key']}"] = c.get("has_unit_refs", True)
+    pdf_bytes = _build_pdf(ev, subitem_name_map=name_map)
     filename = f"evento_{(ev.get('reference') or ev.get('name','evento')).replace(' ', '_')}.pdf"
     return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
                              headers={"Content-Disposition": f'attachment; filename="{filename}"'})

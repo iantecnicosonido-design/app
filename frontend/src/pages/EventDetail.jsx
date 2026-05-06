@@ -26,6 +26,7 @@ export default function EventDetail() {
   const [materials, setMaterials] = useState([]);
   const [providers, setProviders] = useState([]);
   const [packs, setPacks] = useState([]);
+  const [allUnits, setAllUnits] = useState([]);
   const [matOpen, setMatOpen] = useState(false);
   const [packOpen, setPackOpen] = useState(false);
   const [rentOpen, setRentOpen] = useState(false);
@@ -46,6 +47,7 @@ export default function EventDetail() {
     api.get("/materials").then((r) => setMaterials(r.data));
     api.get("/providers").then((r) => setProviders(r.data));
     api.get("/packs").then((r) => setPacks(r.data));
+    api.get("/units").then((r) => setAllUnits(r.data));
     /* eslint-disable-next-line */
   }, [id]);
 
@@ -228,14 +230,23 @@ export default function EventDetail() {
                       {(m.units || []).map((u) => (
                         <div key={u.unit_id} style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>
                           • <span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)" }}>{u.reference}</span>
-                          {(u.subitems || []).map((s, i) => (
-                            <div key={i} style={{ marginLeft: 16, fontStyle: "italic", fontSize: 11, color: "var(--ink-mute)" }}>
-                              ↳ {s.type === "unit"
-                                ? <><span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)", fontStyle: "normal" }}>({s.unit_reference || ""})</span> [{s.name}]</>
-                                : s.name}
-                              <span style={{ fontFamily: "JetBrains Mono, monospace", fontStyle: "normal" }}> x{s.qty}</span>
-                            </div>
-                          ))}
+                          {(u.subitems || []).map((s, i) => {
+                            let displayName = s.name;
+                            const ref = s.unit_reference || "";
+                            if (s.type === "unit" && (!s.name || s.name.startsWith("("))) {
+                              const subU = allUnits.find((x) => x.id === s.unit_id);
+                              const subM = subU ? materials.find((mm) => mm.id === subU.material_id) : null;
+                              if (subM) displayName = subM.name;
+                            }
+                            return (
+                              <div key={i} style={{ marginLeft: 16, fontStyle: "italic", fontSize: 11, color: "var(--ink-mute)" }}>
+                                ↳ {s.type === "unit"
+                                  ? <><span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)", fontStyle: "normal" }}>({ref})</span> [{displayName}]</>
+                                  : displayName}
+                                <span style={{ fontFamily: "JetBrains Mono, monospace", fontStyle: "normal" }}> x{s.qty}</span>
+                              </div>
+                            );
+                          })}
                         </div>
                       ))}
                     </div>
