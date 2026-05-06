@@ -1,10 +1,13 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, Boxes, CalendarDays, Building2 } from "lucide-react";
+import { LayoutDashboard, Boxes, CalendarDays, Building2, Wrench, Package, GanttChartSquare } from "lucide-react";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard", exact: true },
   { to: "/inventario", icon: Boxes, label: "Inventario" },
   { to: "/eventos", icon: CalendarDays, label: "Eventos" },
+  { to: "/timeline", icon: GanttChartSquare, label: "Timeline" },
+  { to: "/packs", icon: Package, label: "Packs" },
+  { to: "/incidencias", icon: Wrench, label: "Incidencias" },
   { to: "/proveedores", icon: Building2, label: "Proveedores" },
 ];
 
@@ -29,7 +32,7 @@ export default function Layout() {
           ))}
         </nav>
         <div style={{ marginTop: 32, padding: "12px 14px", borderTop: "1px solid var(--sidebar-line)", fontFamily: "JetBrains Mono, monospace", fontSize: 10, color: "#a8a29e", letterSpacing: "0.1em" }}>
-          v1.0 · uso interno
+          v2.0 · uso interno
         </div>
       </aside>
       <main className="main">

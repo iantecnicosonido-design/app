@@ -7,6 +7,9 @@ import Inventory from "@/pages/Inventory";
 import Events from "@/pages/Events";
 import EventDetail from "@/pages/EventDetail";
 import Providers from "@/pages/Providers";
+import Packs from "@/pages/Packs";
+import Incidents from "@/pages/Incidents";
+import Timeline from "@/pages/Timeline";
 
 function App() {
   return (
@@ -19,6 +22,9 @@ function App() {
             <Route path="/eventos" element={<Events />} />
             <Route path="/eventos/:id" element={<EventDetail />} />
             <Route path="/proveedores" element={<Providers />} />
+            <Route path="/packs" element={<Packs />} />
+            <Route path="/incidencias" element={<Incidents />} />
+            <Route path="/timeline" element={<Timeline />} />
           </Route>
         </Routes>
       </BrowserRouter>
