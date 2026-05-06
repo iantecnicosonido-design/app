@@ -7,6 +7,7 @@ import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
 const fmtDt = (s) => {
@@ -336,13 +337,13 @@ export default function EventDetail() {
             <Lbl label="Material"><Input value={rentForm.name} onChange={(e) => setRentForm({ ...rentForm, name: e.target.value })} /></Lbl>
             <Lbl label="Cantidad"><Input type="number" min={1} value={rentForm.quantity} onChange={(e) => setRentForm({ ...rentForm, quantity: parseInt(e.target.value || "1") })} /></Lbl>
             <Lbl label="Empresa proveedora">
-              <Select value={rentForm.provider_id || "none"} onValueChange={(v) => setRentForm({ ...rentForm, provider_id: v === "none" ? "" : v })}>
-                <SelectTrigger><SelectValue placeholder="Sin empresa..." /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— Sin empresa —</SelectItem>
-                  {providers.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <SearchSelect
+                placeholder="Buscar proveedor..."
+                value={rentForm.provider_id}
+                onChange={(v) => setRentForm({ ...rentForm, provider_id: v })}
+                allowClear
+                options={providers.map((p) => ({ value: p.id, label: p.name, sub: p.contact || p.phone || "", keywords: (p.contact || "") + " " + (p.phone || "") }))}
+              />
             </Lbl>
             <Lbl label="Notas"><Textarea rows={2} value={rentForm.notes} onChange={(e) => setRentForm({ ...rentForm, notes: e.target.value })} /></Lbl>
           </div>

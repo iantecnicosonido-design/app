@@ -6,6 +6,7 @@ import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
 export default function Incidents() {
@@ -18,9 +19,11 @@ export default function Incidents() {
   const [form, setForm] = useState({ unit_id: "", status: "broken", description: "", files: [] });
   const [resolveForm, setResolveForm] = useState({ description: "", files: [] });
 
+  const [materials, setMaterials] = useState([]);
   const load = async () => {
     setList((await api.get("/incidents")).data);
     setUnits((await api.get("/units")).data);
+    setMaterials((await api.get("/materials")).data);
   };
   useEffect(() => { load(); }, []);
 
@@ -99,10 +102,15 @@ export default function Incidents() {
           <DialogHeader><DialogTitle>Reportar incidencia</DialogTitle></DialogHeader>
           <div style={{ display: "grid", gap: 12 }}>
             <Lbl label="Unidad afectada">
-              <Select value={form.unit_id} onValueChange={(v) => setForm({ ...form, unit_id: v })}>
-                <SelectTrigger><SelectValue placeholder="Elige unidad..." /></SelectTrigger>
-                <SelectContent>{availableUnits.map((u) => <SelectItem key={u.id} value={u.id}>{u.reference}</SelectItem>)}</SelectContent>
-              </Select>
+              <SearchSelect
+                placeholder="Buscar por referencia o nombre..."
+                value={form.unit_id}
+                onChange={(v) => setForm({ ...form, unit_id: v })}
+                options={availableUnits.map((u) => {
+                  const m = materials.find((x) => x.id === u.material_id);
+                  return { value: u.id, label: u.reference, sub: m?.name || "", keywords: m?.name || "" };
+                })}
+              />
             </Lbl>
             <Lbl label="Estado">
               <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>

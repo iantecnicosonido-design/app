@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import SearchSelect from "../components/SearchSelect";
 
 const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
@@ -120,26 +121,31 @@ export default function Timeline() {
             </SelectContent>
           </Select>
           {filterMode === "material" && (
-            <Select value={filterId} onValueChange={setFilterId}>
-              <SelectTrigger style={{ width: 360 }}><SelectValue placeholder="Elige material..." /></SelectTrigger>
-              <SelectContent>
-                {materials.map((m) => <SelectItem key={m.id} value={m.id}>{m.reference} · {m.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <SearchSelect
+              width={360}
+              placeholder="Buscar material..."
+              value={filterId}
+              onChange={setFilterId}
+              options={materials.map((m) => ({ value: m.id, label: `${m.reference} · ${m.name}`, sub: `${m.category} · ${m.quantity} unid.`, keywords: m.name + " " + m.category }))}
+            />
           )}
           {filterMode === "unit" && (
-            <Select value={filterId} onValueChange={setFilterId}>
-              <SelectTrigger style={{ width: 280 }}><SelectValue placeholder="Elige unidad..." /></SelectTrigger>
-              <SelectContent>
-                {units.slice(0, 1000).map((u) => <SelectItem key={u.id} value={u.id}>{u.reference}</SelectItem>)}
-              </SelectContent>
-            </Select>
+            <SearchSelect
+              width={280}
+              placeholder="Buscar unidad..."
+              value={filterId}
+              onChange={setFilterId}
+              options={units.map((u) => ({ value: u.id, label: u.reference, sub: (materials.find((m) => m.id === u.material_id)?.name) || "", keywords: (materials.find((m) => m.id === u.material_id)?.name) || "" }))}
+            />
           )}
           {filterMode === "pack" && (
-            <Select value={filterId} onValueChange={setFilterId}>
-              <SelectTrigger style={{ width: 280 }}><SelectValue placeholder="Elige pack..." /></SelectTrigger>
-              <SelectContent>{packs.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}</SelectContent>
-            </Select>
+            <SearchSelect
+              width={280}
+              placeholder="Buscar pack..."
+              value={filterId}
+              onChange={setFilterId}
+              options={packs.map((p) => ({ value: p.id, label: p.name, sub: p.description || `${p.items.length} ítems` }))}
+            />
           )}
           {filterMode !== "all" && filterId && (
             <span style={{ fontSize: 12, color: "var(--bad)", fontWeight: 600 }}>

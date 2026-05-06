@@ -5,6 +5,7 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
 const STATUS_BADGE = {
@@ -255,15 +256,18 @@ export default function Inventory() {
               {unitForm.subitems.map((s, i) => (
                 <div key={i} style={{ display: "grid", gridTemplateColumns: s.type === "unit" ? "1fr 80px 36px" : "1fr 80px 36px", gap: 8, marginBottom: 8, alignItems: "center" }}>
                   {s.type === "unit" ? (
-                    <Select value={s.unit_id} onValueChange={(v) => {
-                      const u = allUnits.find((x) => x.id === v);
-                      updateSub(i, { unit_id: v, unit_reference: u?.reference || "", name: u ? `(${u.reference})` : "" });
-                    }}>
-                      <SelectTrigger><SelectValue placeholder="Elige unidad..." /></SelectTrigger>
-                      <SelectContent>
-                        {allUnits.filter((x) => x.id !== editingUnit?.id).map((x) => <SelectItem key={x.id} value={x.id}>{x.reference}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <SearchSelect
+                      placeholder="Buscar unidad por referencia..."
+                      value={s.unit_id}
+                      onChange={(v) => {
+                        const u = allUnits.find((x) => x.id === v);
+                        updateSub(i, { unit_id: v, unit_reference: u?.reference || "", name: u ? `(${u.reference})` : "" });
+                      }}
+                      options={allUnits.filter((x) => x.id !== editingUnit?.id).map((x) => {
+                        const m = materials.find((mm) => mm.id === x.material_id);
+                        return { value: x.id, label: x.reference, sub: m?.name || "", keywords: m?.name || "" };
+                      })}
+                    />
                   ) : (
                     <Input placeholder="Descripción libre" value={s.name} onChange={(e) => updateSub(i, { name: e.target.value })} />
                   )}

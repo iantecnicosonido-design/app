@@ -6,6 +6,7 @@ import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
 export default function Packs() {
@@ -106,17 +107,17 @@ export default function Packs() {
                       {CATEGORIES.map((c) => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <Select value={it.material_id} onValueChange={(v) => {
-                    const m = materials.find((x) => x.id === v);
-                    updateItem(i, { material_id: v, name: m?.name || "" });
-                  }}>
-                    <SelectTrigger><SelectValue placeholder="Material..." /></SelectTrigger>
-                    <SelectContent>
-                      {materials.filter((m) => !form._cat?.[i] || form._cat[i] === "all" || m.category === form._cat[i]).map((m) => (
-                        <SelectItem key={m.id} value={m.id}>{m.reference} · {m.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchSelect
+                    placeholder="Buscar material por nombre o referencia..."
+                    value={it.material_id}
+                    onChange={(v) => {
+                      const m = materials.find((x) => x.id === v);
+                      updateItem(i, { material_id: v, name: m?.name || "" });
+                    }}
+                    options={materials.filter((m) => !form._cat?.[i] || form._cat[i] === "all" || m.category === form._cat[i]).map((m) => ({
+                      value: m.id, label: `${m.reference} · ${m.name}`, sub: `${m.category} · ${m.quantity} unid.`, keywords: m.name + " " + m.category,
+                    }))}
+                  />
                   <Input type="number" min={1} value={it.quantity} onChange={(e) => updateItem(i, { quantity: parseInt(e.target.value || "1") })} />
                   <Button size="icon" variant="ghost" onClick={() => removeItem(i)}><Trash2 size={14} /></Button>
                 </div>
