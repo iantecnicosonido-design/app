@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, CATEGORIES } from "../lib/api";
+import { api } from "../lib/api";
 import { Plus, Trash2, Pencil, Package } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -12,6 +12,7 @@ import { toast } from "sonner";
 export default function Packs() {
   const [packs, setPacks] = useState([]);
   const [materials, setMaterials] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", description: "", items: [] });
@@ -19,6 +20,7 @@ export default function Packs() {
   const load = async () => {
     setPacks((await api.get("/packs")).data);
     setMaterials((await api.get("/materials")).data);
+    setCategories((await api.get("/categories")).data);
   };
   useEffect(() => { load(); }, []);
 
@@ -104,7 +106,7 @@ export default function Packs() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todas</SelectItem>
-                      {CATEGORIES.map((c) => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)}
+                      {categories.map((c) => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <SearchSelect

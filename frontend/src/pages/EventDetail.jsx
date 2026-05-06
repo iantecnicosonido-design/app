@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { api, API, CATEGORIES, formatDate } from "../lib/api";
+import { api, API, formatDate } from "../lib/api";
 import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -27,6 +27,7 @@ export default function EventDetail() {
   const [providers, setProviders] = useState([]);
   const [packs, setPacks] = useState([]);
   const [allUnits, setAllUnits] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [matOpen, setMatOpen] = useState(false);
   const [packOpen, setPackOpen] = useState(false);
   const [rentOpen, setRentOpen] = useState(false);
@@ -48,6 +49,7 @@ export default function EventDetail() {
     api.get("/providers").then((r) => setProviders(r.data));
     api.get("/packs").then((r) => setPacks(r.data));
     api.get("/units").then((r) => setAllUnits(r.data));
+    api.get("/categories").then((r) => setCategories(r.data));
     /* eslint-disable-next-line */
   }, [id]);
 
@@ -131,8 +133,12 @@ export default function EventDetail() {
   };
   const exportPDF = () => window.open(`${API}/events/${id}/export`, "_blank");
 
-  const grouped = { audio: [], video: [], luces: [], estructuras: [] };
-  ev.materials.forEach((m) => grouped[m.category]?.push(m));
+  const grouped = {};
+  categories.forEach((c) => { grouped[c.key] = []; });
+  ev.materials.forEach((m) => {
+    if (!grouped[m.category]) grouped[m.category] = [];
+    grouped[m.category].push(m);
+  });
 
   const filteredMaterials = materials.filter((m) =>
     !searchQ || m.name.toLowerCase().includes(searchQ.toLowerCase()) || (m.reference || "").toLowerCase().includes(searchQ.toLowerCase())
@@ -213,7 +219,7 @@ export default function EventDetail() {
         </div>
         {ev.materials.length === 0 ? <p style={{ color: "var(--ink-mute)", fontSize: 14 }}>Aún no se ha bloqueado material.</p> : (
           <>
-            {CATEGORIES.map((c) => grouped[c.key].length > 0 && (
+            {categories.map((c) => (grouped[c.key] || []).length > 0 && (
               <div key={c.key} style={{ marginBottom: 14 }}>
                 <div style={{ marginBottom: 8 }}><span className={`cat-pill cat-${c.key}`}>{c.label}</span></div>
                 {grouped[c.key].map((m) => (
