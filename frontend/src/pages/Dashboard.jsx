@@ -1,90 +1,151 @@
-import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { api, formatDate } from "../lib/api";
 import { Link } from "react-router-dom";
-import { CalendarDays, Boxes, CircleCheck, CircleAlert } from "lucide-react";
+import { CalendarDays, Boxes, Wrench, Package, GanttChartSquare } from "lucide-react";
+import { MonthCalendar } from "./Events";
 
-const CAT_LABEL = { audio: "Audio", video: "Video", luces: "Luces", estructuras: "Estructuras" };
+function startOfWeek(d) {
+  const x = new Date(d); x.setHours(0, 0, 0, 0);
+  const dow = (x.getDay() + 6) % 7; // Mon=0
+  x.setDate(x.getDate() - dow);
+  return x;
+}
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [events, setEvents] = useState([]);
+  const today = new Date();
+  const [calYear, setCalYear] = useState(today.getFullYear());
+  const [calMonth, setCalMonth] = useState(today.getMonth());
 
   useEffect(() => {
     api.get("/stats").then((r) => setStats(r.data));
     api.get("/events").then((r) => setEvents(r.data));
   }, []);
 
-  const upcoming = [...events]
-    .filter((e) => e.status === "abierto")
-    .sort((a, b) => (a.event_date || "").localeCompare(b.event_date || ""))
-    .slice(0, 6);
+  const groups = useMemo(() => {
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const wkStart = startOfWeek(now);
+    const wkEnd = addDays(wkStart, 7);
+    const nextWkEnd = addDays(wkEnd, 7);
+
+    const inRange = (e, from, to) => {
+      const d = e.event_date ? new Date(e.event_date) : null;
+      if (!d) return false;
+      d.setHours(0, 0, 0, 0);
+      return d >= from && d < to;
+    };
+
+    const future = (e) => {
+      const d = e.event_date ? new Date(e.event_date) : null;
+      if (!d) return false;
+      d.setHours(0, 0, 0, 0);
+      return d >= nextWkEnd;
+    };
+
+    const sortByDate = (a, b) => (a.event_date || "").localeCompare(b.event_date || "");
+
+    return {
+      thisWeek: events.filter((e) => inRange(e, wkStart, wkEnd)).sort(sortByDate),
+      nextWeek: events.filter((e) => inRange(e, wkEnd, nextWkEnd)).sort(sortByDate),
+      later: events.filter(future).sort(sortByDate),
+    };
+  }, [events]);
 
   return (
     <div data-testid="dashboard-page">
       <h2 className="page-title">Bienvenido</h2>
-      <p className="page-sub">Vista general del stock y los próximos eventos</p>
+      <p className="page-sub">Resumen de la actividad</p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 16, marginBottom: 28 }}>
-        <div className="stat-card" data-testid="stat-materials">
-          <div className="label">Referencias</div>
-          <div className="value">{stats?.total_materials ?? "—"}</div>
-          <div className="delta">en inventario</div>
-        </div>
-        <div className="stat-card" data-testid="stat-events">
-          <div className="label">Eventos</div>
-          <div className="value">{stats?.total_events ?? "—"}</div>
-          <div className="delta">{stats?.open_events ?? 0} abiertos · {stats?.closed_events ?? 0} cerrados</div>
-        </div>
-        {stats && Object.entries(stats.by_category || {}).map(([cat, v]) => (
-          <div className="stat-card" key={cat} data-testid={`stat-cat-${cat}`}>
-            <div className="label">{CAT_LABEL[cat] || cat}</div>
-            <div className="value">{v.qty}</div>
-            <div className="delta">{v.blocked} bloqueados · {v.count} refs</div>
-          </div>
-        ))}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14, marginBottom: 22 }}>
+        <StatCard label="Eventos abiertos" value={stats?.open_events ?? "—"} sub={`${stats?.closed_events ?? 0} cerrados`} icon={CalendarDays} />
+        <StatCard label="Material" value={stats?.total_units ?? "—"} sub={`${stats?.total_materials ?? 0} referencias`} icon={Boxes} />
+        <StatCard label="Incidencias abiertas" value={stats?.incidents ?? 0} sub="averías o reparación" icon={Wrench} alert={(stats?.incidents ?? 0) > 0} />
+        <StatCard label="Esta semana" value={groups.thisWeek.length} sub={`${groups.thisWeek.filter(e => e.status==="cerrado").length} cerrados`} icon={CalendarDays} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-        <div className="card-paper" data-testid="upcoming-events-card">
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}><CalendarDays size={16} style={{ verticalAlign: "-3px", marginRight: 8, color: "var(--accent)" }} />Próximos eventos</h3>
-            <Link to="/eventos" className="subtle-link">ver todos</Link>
-          </div>
-          {upcoming.length === 0 ? (
-            <p style={{ color: "var(--ink-mute)", fontSize: 14 }}>No hay eventos abiertos.</p>
-          ) : (
-            <div>
-              {upcoming.map((e) => (
-                <Link key={e.id} to={`/eventos/${e.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                  <div className="row-hover" style={{ padding: "10px 8px", borderBottom: "1px solid var(--line)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{e.name}</div>
-                      <div style={{ color: "var(--ink-mute)", fontSize: 12 }}>{e.client_name || "—"} · {e.location || "—"}</div>
-                    </div>
-                    <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--ink-soft)" }}>{e.event_date || "—"}</div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="card-paper" data-testid="quick-actions-card">
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 18, marginBottom: 18 }}>
+        <MonthCalendar year={calYear} month={calMonth} events={events} compact
+          onPrev={() => { if (calMonth === 0) { setCalYear(calYear - 1); setCalMonth(11); } else setCalMonth(calMonth - 1); }}
+          onNext={() => { if (calMonth === 11) { setCalYear(calYear + 1); setCalMonth(0); } else setCalMonth(calMonth + 1); }}
+          onToday={() => { setCalYear(today.getFullYear()); setCalMonth(today.getMonth()); }}
+        />
+        <div className="card-paper">
           <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700 }}>Accesos rápidos</h3>
-          <div style={{ display: "grid", gap: 10 }}>
-            <Link to="/eventos" className="row-hover" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 10, textDecoration: "none", color: "inherit", display: "flex", alignItems: "center", gap: 12 }}>
-              <CalendarDays size={18} color="#b45309" /> <span><b>Crear evento</b><div style={{ fontSize: 12, color: "var(--ink-mute)" }}>Bolo o alquiler simple</div></span>
-            </Link>
-            <Link to="/inventario" className="row-hover" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 10, textDecoration: "none", color: "inherit", display: "flex", alignItems: "center", gap: 12 }}>
-              <Boxes size={18} color="#b45309" /> <span><b>Gestionar inventario</b><div style={{ fontSize: 12, color: "var(--ink-mute)" }}>Audio, video, luces, estructuras</div></span>
-            </Link>
-            <div style={{ padding: 14, border: "1px dashed var(--line)", borderRadius: 10, fontSize: 13, color: "var(--ink-soft)" }}>
-              <CircleCheck size={14} style={{ verticalAlign: "-2px", color: "var(--good)", marginRight: 6 }} />
-              Bloquea material desde cada evento. Al cerrarlo, exporta el listado en PDF.
-            </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            <QA to="/eventos" icon={CalendarDays} label="Crear evento" sub="Bolo o alquiler" />
+            <QA to="/inventario" icon={Boxes} label="Inventario" sub="Audio · Video · Luces · Estructuras" />
+            <QA to="/timeline" icon={GanttChartSquare} label="Timeline" sub="Ver ocupación mensual" />
+            <QA to="/packs" icon={Package} label="Packs" sub="Plantillas de material" />
+            <QA to="/incidencias" icon={Wrench} label="Incidencias" sub="Averías y reparaciones" />
           </div>
         </div>
       </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 18 }}>
+        <EventsCard title="Esta semana" events={groups.thisWeek} empty="Sin eventos esta semana." />
+        <EventsCard title="Próxima semana" events={groups.nextWeek} empty="Sin eventos la próxima semana." />
+        <EventsCard title="Más adelante" events={groups.later} empty="Nada planificado todavía." />
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, icon: Icon, alert }) {
+  return (
+    <div className="stat-card" style={{ borderColor: alert ? "#b91c1c" : "var(--line)", background: alert ? "#fef2f2" : "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div className="label">{label}</div>
+        {Icon && <Icon size={16} color={alert ? "#b91c1c" : "var(--ink-mute)"} />}
+      </div>
+      <div className="value" style={{ color: alert ? "#b91c1c" : "var(--ink)" }}>{value}</div>
+      <div className="delta">{sub}</div>
+    </div>
+  );
+}
+
+function QA({ to, icon: Icon, label, sub }) {
+  return (
+    <Link to={to} className="row-hover" style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 10, textDecoration: "none", color: "inherit", display: "flex", alignItems: "center", gap: 12 }}>
+      <Icon size={18} color="var(--accent)" />
+      <div><div style={{ fontWeight: 600, fontSize: 14 }}>{label}</div><div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{sub}</div></div>
+    </Link>
+  );
+}
+
+function EventsCard({ title, events, empty }) {
+  const opens = events.filter((e) => e.status !== "cerrado");
+  const closeds = events.filter((e) => e.status === "cerrado");
+  return (
+    <div className="card-paper">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700 }}>{title}</h3>
+        <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)" }}>{events.length}</span>
+      </div>
+      {events.length === 0 ? <p style={{ color: "var(--ink-mute)", fontSize: 13, margin: 0 }}>{empty}</p> : (
+        <>
+          <Section title="Abiertos" items={opens} color="var(--good)" />
+          <Section title="Cerrados" items={closeds} color="var(--ink-mute)" />
+        </>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, items, color }) {
+  if (items.length === 0) return null;
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.12em", color, fontWeight: 700, marginBottom: 6 }}>{title} · {items.length}</div>
+      {items.map((e) => (
+        <Link key={e.id} to={`/eventos/${e.id}`} className="row-hover" style={{ display: "flex", justifyContent: "space-between", padding: "6px 8px", borderRadius: 6, textDecoration: "none", color: "inherit", marginBottom: 2, background: "#faf6ef" }}>
+          <span style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginRight: 8 }}>
+            {e.name} <span style={{ fontSize: 10, marginLeft: 4, color: e.type === "bolo" ? "#92400e" : "#1e3a8a", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase" }}>{e.type}</span>
+          </span>
+          <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)" }}>{formatDate(e.event_date)}</span>
+        </Link>
+      ))}
     </div>
   );
 }
