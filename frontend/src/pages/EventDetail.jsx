@@ -232,30 +232,32 @@ export default function EventDetail() {
                         {!isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)}><Trash2 size={14} /></Button>}
                       </div>
                     </div>
-                    <div style={{ paddingLeft: 110, marginTop: 6 }}>
-                      {(m.units || []).map((u) => (
-                        <div key={u.unit_id} style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>
-                          • <span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)" }}>{u.reference}</span>
-                          {(u.subitems || []).map((s, i) => {
-                            let displayName = s.name;
-                            const ref = s.unit_reference || "";
-                            if (s.type === "unit" && (!s.name || s.name.startsWith("("))) {
-                              const subU = allUnits.find((x) => x.id === s.unit_id);
-                              const subM = subU ? materials.find((mm) => mm.id === subU.material_id) : null;
-                              if (subM) displayName = subM.name;
-                            }
-                            return (
-                              <div key={i} style={{ marginLeft: 16, fontStyle: "italic", fontSize: 11, color: "var(--ink-mute)" }}>
-                                ↳ {s.type === "unit"
-                                  ? <><span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)", fontStyle: "normal" }}>({ref})</span> [{displayName}]</>
-                                  : displayName}
-                                <span style={{ fontFamily: "JetBrains Mono, monospace", fontStyle: "normal" }}> x{s.qty}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ))}
-                    </div>
+                    {c.has_unit_refs !== false && (
+                      <div style={{ paddingLeft: 110, marginTop: 6 }}>
+                        {(m.units || []).map((u) => (
+                          <div key={u.unit_id} style={{ fontSize: 12, color: "var(--ink-soft)", padding: "2px 0" }}>
+                            • <span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)" }}>{u.reference}</span>
+                            {(u.subitems || []).map((s, i) => {
+                              let displayName = s.name;
+                              const ref = s.unit_reference || "";
+                              if (s.type === "unit" && (!s.name || s.name.startsWith("("))) {
+                                const subU = allUnits.find((x) => x.id === s.unit_id);
+                                const subM = subU ? materials.find((mm) => mm.id === subU.material_id) : null;
+                                if (subM) displayName = subM.name;
+                              }
+                              return (
+                                <div key={i} style={{ marginLeft: 16, fontStyle: "italic", fontSize: 11, color: "var(--ink-mute)" }}>
+                                  ↳ {s.type === "unit"
+                                    ? <><span style={{ fontFamily: "JetBrains Mono, monospace", color: "var(--accent)", fontStyle: "normal" }}>({ref})</span> [{displayName}]</>
+                                    : displayName}
+                                  <span style={{ fontFamily: "JetBrains Mono, monospace", fontStyle: "normal" }}> x{s.qty}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

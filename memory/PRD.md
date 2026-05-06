@@ -5,48 +5,57 @@ App en español para controlar el stock de material de empresa de eventos. Categ
 
 ## User Choices
 - Sin login (acceso libre, app interna)
-- Inventario precargado desde PDFs (262 referencias)
+- Inventario precargado desde PDFs (262 referencias originales, hoy 308)
 - PDF generado en servidor (reportlab)
 - Bloqueo resta del stock disponible
 - Lista de empresas proveedoras gestionable
+- Categorías dinámicas (añadibles desde UI) con flags `has_unit_refs` y `has_subitems`
+- Categoría "Cables" sin numeración por unidad ni subítems (solo nombre + cantidad)
 
 ## Architecture
 - Backend: FastAPI + Motor (MongoDB async) + reportlab para PDF. Todos los endpoints bajo `/api`.
 - Frontend: React 19 + Tailwind + shadcn/ui + sonner + react-router-dom. Tipografía Outfit + JetBrains Mono. Tema cream/zinc con acento ámbar.
-- Datos: Material {id, category, name, quantity, blocked}, Event {id, name, type, client_name, reference, location, setup_date, event_date, end_date, schedule, notes, status, materials[], rentals[]}, Provider {id, name, contact, phone, email, notes}.
+- Datos clave:
+  - `categories`: {id, key, label, prefix, has_subitems, has_unit_refs, order}
+  - `materials`: {id, category, reference, name, quantity, blocked}
+  - `units`: {id, material_id, reference, status, subitems[], notes}
+  - `events`: {id, name, type, client_name, reference, location, setup_date, event_date, end_date, schedule, warehouse_out_dt, setup_start_dt, setup_end_dt, act_start_dt, act_end_dt, dismount_start_dt, dismount_end_dt, return_dt, notes, status, materials[], rentals[]}
+  - `packs`: {id, name, description, items[]}
+  - `incidents`: {id, unit_id, description, status}
+  - `providers`: {id, name, contact, phone, email, notes}
 
-## Implementation (29-Apr-2026)
-- ✅ Seed automático de inventario (262 ítems desde `seed_inventory.json`) en startup si la colección está vacía
-- ✅ CRUD de materiales con búsqueda y filtro por categoría
-- ✅ CRUD de eventos con tipo alquiler/bolo y todos los campos de la ficha
-- ✅ Bloqueo/desbloqueo de material por evento con control de stock disponible (delta logic)
-- ✅ Material de alquiler externo por evento, vinculado a proveedor
-- ✅ CRUD de proveedores
-- ✅ Cerrar/reabrir evento, eliminación devuelve stock al inventario
-- ✅ Exportación PDF estilizada (info, material por categoría, alquileres)
-- ✅ Vista calendario de eventos (shadcn calendar multi-select)
-- ✅ Dashboard con stats (total, por categoría, bloqueados, próximos eventos)
-- ✅ Testing: 6/6 pytest backend + Playwright UI flows al 100%
+## Implementation (latest 06-May-2026)
+- ✅ Seed automático de inventario (308 ítems, 1491 unidades)
+- ✅ CRUD materiales + unidades + subítems
+- ✅ Categorías dinámicas (CRUD desde UI con switches has_unit_refs / has_subitems)
+- ✅ Categoría "Cables" migrada (39 items) sin unit refs ni subitems
+- ✅ Eventos (bolo/alquiler) con ventana de bloqueo precisa
+- ✅ Bloqueo/desbloqueo a nivel de unidad
+- ✅ Packs de material
+- ✅ Incidencias por unidad
+- ✅ Timeline mensual
+- ✅ PDF con logo Edison Bryan
+- ✅ Dashboard + calendarios
+
+## Fixes recientes (06-May-2026)
+- Bug: crash al abrir eventos por `grouped[c.key]` con categorías dinámicas → fix en `EventDetail.jsx`, `Inventory.jsx`, `Packs.jsx` (usan `/api/categories` dinámicamente)
+- UI: categoría "Cables" ya no muestra desglose por unidad en la vista de evento (solo nombre + cantidad)
 
 ## Backlog
 ### P1
-- Validación en backend: rechazar `quantity<0` antes del cálculo de delta para mensajes más claros
-- DELETE /api/providers/{id}: devolver 404 si no existe y limpiar referencias en rentals
-- Soporte de roles/usuarios (si se quiere protección)
-- Logo personalizado en el PDF
+- Incidencias: añadir textarea para descripción extensa de la avería
+- Incidencias: subida de fotos (jpg/png) y PDF adjuntos, con preview
+- Logo personalizable en PDF (actualmente fijo)
 
 ### P2
 - Importar/exportar inventario en CSV
-- Histórico de movimientos por material
-- Vista mensual del calendario con eventos clicables
-- Notificaciones (email/WhatsApp) al cerrar evento con PDF adjunto
-- Sub-categorías o etiquetas (DJ, micrófono, conector, etc.)
-- Multi-empresa / multi-almacén
+- Histórico de movimientos/incidencias por unidad (ver en qué eventos ha estado y sus averías)
+- Notificaciones email/WhatsApp al cerrar evento con PDF adjunto
 
 ## Key Files
-- `/app/backend/server.py` - FastAPI app
-- `/app/backend/seed_inventory.json` - 262 ítems iniciales
+- `/app/backend/server.py` - FastAPI app (incluye PDF + categorías dinámicas)
+- `/app/backend/seed_inventory.json` - seed
 - `/app/frontend/src/App.js` - rutas
-- `/app/frontend/src/pages/{Dashboard,Inventory,Events,EventDetail,Providers}.jsx`
-- `/app/frontend/src/components/Layout.jsx` - sidebar + outlet
-- `/app/frontend/src/lib/api.js` - axios instance
+- `/app/frontend/src/pages/{Dashboard,Inventory,Events,EventDetail,Providers,Packs,Incidents,Timeline}.jsx`
+- `/app/frontend/src/components/{Layout,SearchSelect}.jsx`
+- `/app/frontend/src/lib/api.js` - axios instance + helpers

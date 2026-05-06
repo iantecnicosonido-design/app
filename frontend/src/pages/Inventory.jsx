@@ -55,10 +55,14 @@ export default function Inventory() {
   useEffect(() => { const t = setTimeout(load, 200); return () => clearTimeout(t); /* eslint-disable-next-line */ }, [q]);
 
   const grouped = useMemo(() => {
-    const g = { audio: [], video: [], luces: [], estructuras: [] };
-    materials.forEach((i) => g[i.category]?.push(i));
+    const g = {};
+    categories.forEach((c) => { g[c.key] = []; });
+    materials.forEach((i) => {
+      if (!g[i.category]) g[i.category] = [];
+      g[i.category].push(i);
+    });
     return g;
-  }, [materials]);
+  }, [materials, categories]);
 
   const toggleExpand = async (m) => {
     const isOpen = !expanded[m.id];
