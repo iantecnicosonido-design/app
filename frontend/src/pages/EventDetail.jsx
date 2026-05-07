@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, API, formatDate } from "../lib/api";
-import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil } from "lucide-react";
+import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -28,6 +28,7 @@ export default function EventDetail() {
   const [packs, setPacks] = useState([]);
   const [allUnits, setAllUnits] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [flightcases, setFlightcases] = useState([]);
   const [matOpen, setMatOpen] = useState(false);
   const [packOpen, setPackOpen] = useState(false);
   const [rentOpen, setRentOpen] = useState(false);
@@ -42,6 +43,9 @@ export default function EventDetail() {
   const [editBlockedAvail, setEditBlockedAvail] = useState(null);
   const [editBlockedSel, setEditBlockedSel] = useState(new Set());
   const [editBlockedQty, setEditBlockedQty] = useState(1);
+  const [distOpen, setDistOpen] = useState(false);
+  const [distMat, setDistMat] = useState(null);
+  const [distMap, setDistMap] = useState({}); // {fc_name: qty}
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -55,6 +59,7 @@ export default function EventDetail() {
     api.get("/packs").then((r) => setPacks(r.data));
     api.get("/units").then((r) => setAllUnits(r.data));
     api.get("/categories").then((r) => setCategories(r.data));
+    api.get("/flightcases").then((r) => setFlightcases(r.data));
     /* eslint-disable-next-line */
   }, [id]);
 
@@ -151,6 +156,52 @@ export default function EventDetail() {
     const next = new Set(editBlockedSel);
     if (next.has(uid)) next.delete(uid); else next.add(uid);
     setEditBlockedSel(next);
+  };
+
+  const startDistribute = (m) => {
+    setDistMat(m);
+    const counts = {};
+    (m.units || []).forEach((u) => {
+      const fc = u.flightcase || "";
+      counts[fc] = (counts[fc] || 0) + 1;
+    });
+    setDistMap(counts);
+    setDistOpen(true);
+  };
+
+  const distTotal = () => Object.values(distMap).reduce((a, b) => a + (parseInt(b) || 0), 0);
+
+  const updateDist = (fc, qty) => {
+    const next = { ...distMap };
+    const v = Math.max(0, parseInt(qty || 0));
+    if (v === 0) delete next[fc]; else next[fc] = v;
+    setDistMap(next);
+  };
+
+  const addFcToDist = (fcName) => {
+    if (!fcName) return;
+    if (distMap[fcName] !== undefined) return;
+    setDistMap({ ...distMap, [fcName]: 0 });
+  };
+
+  const saveDistribution = async () => {
+    if (!distMat) return;
+    const totalUnits = (distMat.units || []).length;
+    if (distTotal() !== totalUnits) {
+      toast.error(`La suma debe ser ${totalUnits} (actual ${distTotal()})`);
+      return;
+    }
+    try {
+      await api.put(`/events/${id}/cable-distribution`, {
+        material_id: distMat.material_id,
+        distribution: distMap,
+      });
+      const r = await api.get(`/events/${id}`);
+      setEv(r.data);
+      setDistOpen(false);
+      setDistMat(null);
+      toast.success("Distribución actualizada");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
   };
 
   const applyPack = async (pid) => {
@@ -279,11 +330,12 @@ export default function EventDetail() {
                 <div style={{ marginBottom: 8 }}><span className={`cat-pill cat-${c.key}`}>{c.label}</span></div>
                 {grouped[c.key].map((m) => (
                   <div key={m.material_id} style={{ borderBottom: "1px solid var(--line)", padding: "10px 4px" }}>
-                    <div className="row-hover" style={{ display: "grid", gridTemplateColumns: "100px 1fr 80px 100px", alignItems: "center", gap: 8 }}>
+                    <div className="row-hover" style={{ display: "grid", gridTemplateColumns: "100px 1fr 80px 130px", alignItems: "center", gap: 8 }}>
                       <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{m.reference || "—"}</span>
                       <div style={{ fontWeight: 500 }}>{m.name}</div>
                       <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13 }}>x{m.units?.length || 0}</div>
                       <div style={{ textAlign: "right", display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                        {!isClosed && c.has_unit_refs === false && <Button size="icon" variant="ghost" onClick={() => startDistribute(m)} title="Distribuir en flightcases"><Box size={14} /></Button>}
                         {!isClosed && <Button size="icon" variant="ghost" onClick={() => startEditBlocked(m)} title="Editar unidades"><Pencil size={14} /></Button>}
                         {!isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)} title="Quitar todo"><Trash2 size={14} /></Button>}
                       </div>
@@ -314,6 +366,21 @@ export default function EventDetail() {
                         ))}
                       </div>
                     )}
+                    {c.has_unit_refs === false && (() => {
+                      const counts = {};
+                      (m.units || []).forEach((u) => { const fc = u.flightcase || ""; counts[fc] = (counts[fc] || 0) + 1; });
+                      const keys = Object.keys(counts);
+                      if (keys.length <= 1 && keys[0] === "") return null;
+                      return (
+                        <div style={{ paddingLeft: 110, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {keys.sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).map((fc) => (
+                            <span key={fc} style={{ fontSize: 11, padding: "3px 10px", borderRadius: 999, background: fc ? "#e0e7ff" : "#f5f5f4", color: fc ? "#3730a3" : "#78716c", fontWeight: 500 }}>
+                              {fc || "Sin flightcase"} · x{counts[fc]}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </div>
                 ))}
               </div>
@@ -493,6 +560,52 @@ export default function EventDetail() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditBlockedOpen(false)}>Cancelar</Button>
             <Button onClick={saveEditBlocked} style={{ background: "var(--accent)" }} data-testid="save-edit-blocked-btn"><Save size={14} /> Guardar cambios</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Distribute cables across flightcases */}
+      <Dialog open={distOpen} onOpenChange={setDistOpen}>
+        <DialogContent style={{ maxWidth: 560 }} data-testid="dist-dialog">
+          <DialogHeader><DialogTitle>Distribuir en flightcases</DialogTitle></DialogHeader>
+          {distMat && (
+            <div>
+              <div style={{ padding: 12, background: "#fffbeb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 14 }}>
+                <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{distMat.reference}</div>
+                <div style={{ fontWeight: 600 }}>{distMat.name}</div>
+                <div style={{ fontSize: 11, color: "var(--ink-mute)", marginTop: 2 }}>
+                  Total bloqueado: {(distMat.units || []).length} · Distribuido: {distTotal()}
+                  {distTotal() !== (distMat.units || []).length && <span style={{ color: "var(--bad)", fontWeight: 600 }}> · debe sumar {(distMat.units || []).length}</span>}
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: 8, marginBottom: 14 }}>
+                {Object.keys(distMap).sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b))).map((fc) => (
+                  <div key={fc} style={{ display: "grid", gridTemplateColumns: "1fr 80px 36px", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontWeight: 500, fontSize: 13 }}>{fc || <span style={{ color: "var(--ink-mute)", fontStyle: "italic" }}>Sin flightcase</span>}</span>
+                    <Input type="number" min={0} value={distMap[fc]} onChange={(e) => updateDist(fc, e.target.value)} data-testid={`dist-qty-${fc || "none"}`} />
+                    {fc !== "" && <Button size="icon" variant="ghost" onClick={() => updateDist(fc, 0)}><Trash2 size={14} /></Button>}
+                    {fc === "" && <span />}
+                  </div>
+                ))}
+              </div>
+              <div style={{ paddingTop: 12, borderTop: "1px dashed var(--line)" }}>
+                <div style={{ fontSize: 11, color: "var(--ink-mute)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "JetBrains Mono, monospace", marginBottom: 8 }}>Añadir flightcase</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {flightcases.filter((f) => distMap[f.name] === undefined).map((f) => (
+                    <Button key={f.id} size="sm" variant="outline" onClick={() => addFcToDist(f.name)}>+ {f.name}</Button>
+                  ))}
+                  {flightcases.filter((f) => distMap[f.name] === undefined).length === 0 && (
+                    <span style={{ fontSize: 12, color: "var(--ink-mute)" }}>
+                      No quedan flightcases en la biblioteca. <Link to="/flightcases" className="subtle-link">Crear nuevos</Link>.
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDistOpen(false)}>Cancelar</Button>
+            <Button onClick={saveDistribution} style={{ background: "var(--accent)" }} data-testid="save-dist-btn"><Save size={14} /> Guardar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

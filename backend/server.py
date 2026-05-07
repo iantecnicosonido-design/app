@@ -172,6 +172,7 @@ class EventUnitSnapshot(BaseModel):
     unit_id: str
     reference: str
     subitems: List[Subitem] = []
+    flightcase: str = ""
 
 
 class EventMaterial(BaseModel):
@@ -279,6 +280,31 @@ class ProviderCreate(BaseModel):
 
 class BulkEventsRequest(BaseModel):
     events: List[EventCreate]
+
+
+class Flightcase(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: str = ""
+    notes: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class FlightcaseCreate(BaseModel):
+    name: str
+    description: str = ""
+    notes: str = ""
+
+
+class FlightcaseUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class CableDistributionRequest(BaseModel):
+    material_id: str
+    distribution: Dict[str, int]  # {flightcase_name: qty}, "" key for unassigned
 
 
 class IncidentCreate(BaseModel):
@@ -846,6 +872,104 @@ async def unblock_material(eid: str, material_id: str):
     return await db.events.find_one({"id": eid}, PROJ)
 
 
+# ---------- Flightcases (library) ----------
+@api_router.get("/flightcases", response_model=List[Flightcase])
+async def list_flightcases():
+    items = await db.flightcases.find({}, PROJ).sort("name", 1).to_list(1000)
+    return items
+
+
+@api_router.post("/flightcases", response_model=Flightcase)
+async def create_flightcase(payload: FlightcaseCreate):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "Nombre obligatorio")
+    existing = await db.flightcases.find_one({"name": name}, PROJ)
+    if existing:
+        raise HTTPException(400, "Ya existe un flightcase con ese nombre")
+    fc = Flightcase(name=name, description=payload.description, notes=payload.notes)
+    await db.flightcases.insert_one(fc.model_dump())
+    return fc
+
+
+@api_router.put("/flightcases/{fid}", response_model=Flightcase)
+async def update_flightcase(fid: str, payload: FlightcaseUpdate):
+    fc = await db.flightcases.find_one({"id": fid}, PROJ)
+    if not fc:
+        raise HTTPException(404, "Flightcase no encontrado")
+    upd = {k: v for k, v in payload.model_dump(exclude_none=True).items()}
+    old_name = fc["name"]
+    new_name = upd.get("name", old_name).strip() if "name" in upd else old_name
+    if "name" in upd:
+        if not new_name:
+            raise HTTPException(400, "Nombre obligatorio")
+        upd["name"] = new_name
+        if new_name != old_name:
+            dup = await db.flightcases.find_one({"name": new_name, "id": {"$ne": fid}}, PROJ)
+            if dup:
+                raise HTTPException(400, "Ya existe un flightcase con ese nombre")
+    if upd:
+        await db.flightcases.update_one({"id": fid}, {"$set": upd})
+    # propagate name change to event units
+    if "name" in upd and new_name != old_name:
+        await db.events.update_many(
+            {"materials.units.flightcase": old_name},
+            {"$set": {"materials.$[].units.$[u].flightcase": new_name}},
+            array_filters=[{"u.flightcase": old_name}],
+        )
+    return await db.flightcases.find_one({"id": fid}, PROJ)
+
+
+@api_router.delete("/flightcases/{fid}")
+async def delete_flightcase(fid: str):
+    fc = await db.flightcases.find_one({"id": fid}, PROJ)
+    if not fc:
+        raise HTTPException(404, "Flightcase no encontrado")
+    # clear assignments on events
+    await db.events.update_many(
+        {"materials.units.flightcase": fc["name"]},
+        {"$set": {"materials.$[].units.$[u].flightcase": ""}},
+        array_filters=[{"u.flightcase": fc["name"]}],
+    )
+    await db.flightcases.delete_one({"id": fid})
+    return {"ok": True}
+
+
+# ---------- Cable distribution per flightcase ----------
+@api_router.put("/events/{eid}/cable-distribution")
+async def set_cable_distribution(eid: str, payload: CableDistributionRequest):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("status") == "cerrado":
+        raise HTTPException(400, "Evento cerrado")
+    em = next((m for m in ev.get("materials", []) if m["material_id"] == payload.material_id), None)
+    if not em:
+        raise HTTPException(404, "Material no bloqueado en el evento")
+    cat = await get_category(em["category"])
+    if cat.get("has_unit_refs", True):
+        raise HTTPException(400, "Solo aplicable a categorías sin numeración por unidad (ej: cables)")
+    units = list(em.get("units", []))
+    total_units = len(units)
+    total_dist = sum(int(v) for v in payload.distribution.values())
+    if total_dist != total_units:
+        raise HTTPException(400, f"La distribución suma {total_dist}, debe sumar {total_units}")
+    # build flat list of fc names per unit position
+    fc_per_unit: List[str] = []
+    for fc_name, qty in payload.distribution.items():
+        for _ in range(int(qty)):
+            fc_per_unit.append(fc_name)
+    # assign
+    for i, u in enumerate(units):
+        u["flightcase"] = fc_per_unit[i] if i < len(fc_per_unit) else ""
+    await db.events.update_one(
+        {"id": eid, "materials.material_id": payload.material_id},
+        {"$set": {"materials.$.units": units}},
+    )
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+
 @api_router.post("/events/{eid}/rentals")
 async def add_rental(eid: str, payload: RentalCreate):
     ev = await db.events.find_one({"id": eid}, PROJ)
@@ -1142,6 +1266,20 @@ def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
                                     story.append(Paragraph(f"↳ <font face='Courier' color='#b45309'>({ref})</font> [{resolved}] <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
                                 else:
                                     story.append(Paragraph(f"↳ {s.get('name','')} <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
+                    else:
+                        # group by flightcase for non-unit-ref categories (cables)
+                        fc_counts: Dict[str, int] = {}
+                        for u in units:
+                            fc = u.get("flightcase") or ""
+                            fc_counts[fc] = fc_counts.get(fc, 0) + 1
+                        if len(fc_counts) > 1 or (len(fc_counts) == 1 and "" not in fc_counts):
+                            for fc_name in sorted(fc_counts.keys(), key=lambda x: (x == "", x)):
+                                qty = fc_counts[fc_name]
+                                label = fc_name if fc_name else "Sin flightcase"
+                                story.append(Paragraph(
+                                    f"&nbsp;&nbsp;• <font color='#57534e'>{label}</font> <font color='#78716c'>x{qty}</font>",
+                                    ParagraphStyle("fc", parent=body, fontSize=10, leftIndent=12),
+                                ))
 
     rentals = event.get("rentals", [])
     if rentals:
