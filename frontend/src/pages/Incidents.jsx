@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, API } from "../lib/api";
-import { Plus, Wrench, FileText, Image as ImgIcon, X } from "lucide-react";
+import { Plus, Wrench, FileText, Image as ImgIcon, X, Filter } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -9,9 +10,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
+const TYPE_LABELS = {
+  report: { label: "Reporte", color: "var(--bad)", bg: "#fee2e2" },
+  update: { label: "Actualización", color: "var(--warn)", bg: "#fef3c7" },
+  resolve: { label: "Resuelto", color: "var(--good)", bg: "#dcfce7" },
+};
+
 export default function Incidents() {
+  const [params, setParams] = useSearchParams();
+  const initialMaterial = params.get("material_id") || "";
+  const initialUnit = params.get("unit_id") || "";
+
+  const [tab, setTab] = useState(initialMaterial || initialUnit ? "history" : "active");
   const [list, setList] = useState([]);
+  const [logs, setLogs] = useState([]);
   const [units, setUnits] = useState([]);
+  const [materials, setMaterials] = useState([]);
+
   const [openNew, setOpenNew] = useState(false);
   const [openHistory, setOpenHistory] = useState(null);
   const [history, setHistory] = useState([]);
@@ -19,13 +34,35 @@ export default function Incidents() {
   const [form, setForm] = useState({ unit_id: "", status: "broken", description: "", files: [] });
   const [resolveForm, setResolveForm] = useState({ description: "", files: [] });
 
-  const [materials, setMaterials] = useState([]);
-  const load = async () => {
+  const [filterMaterial, setFilterMaterial] = useState(initialMaterial);
+  const [filterUnit, setFilterUnit] = useState(initialUnit);
+  const [filterType, setFilterType] = useState("all");
+
+  const loadActive = async () => {
     setList((await api.get("/incidents")).data);
     setUnits((await api.get("/units")).data);
     setMaterials((await api.get("/materials")).data);
   };
-  useEffect(() => { load(); }, []);
+
+  const loadHistory = async () => {
+    const q = {};
+    if (filterMaterial) q.material_id = filterMaterial;
+    if (filterUnit) q.unit_id = filterUnit;
+    if (filterType && filterType !== "all") q.type = filterType;
+    setLogs((await api.get("/incident-logs", { params: q })).data);
+  };
+
+  useEffect(() => { loadActive(); }, []);
+  useEffect(() => { if (tab === "history") loadHistory(); /* eslint-disable-next-line */ }, [tab, filterMaterial, filterUnit, filterType]);
+
+  // sync URL
+  useEffect(() => {
+    const next = {};
+    if (filterMaterial) next.material_id = filterMaterial;
+    if (filterUnit) next.unit_id = filterUnit;
+    setParams(next, { replace: true });
+    /* eslint-disable-next-line */
+  }, [filterMaterial, filterUnit]);
 
   const upload = async (files, target) => {
     const uploaded = [];
@@ -35,7 +72,7 @@ export default function Incidents() {
       try {
         const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
         uploaded.push(r.data);
-      } catch (e) { toast.error(`Error subiendo ${f.name}`); }
+      } catch { toast.error(`Error subiendo ${f.name}`); }
     }
     if (target === "new") setForm((s) => ({ ...s, files: [...s.files, ...uploaded] }));
     else setResolveForm((s) => ({ ...s, files: [...s.files, ...uploaded] }));
@@ -48,7 +85,7 @@ export default function Incidents() {
       await api.post("/incidents", form);
       toast.success("Incidencia registrada");
       setOpenNew(false); setForm({ unit_id: "", status: "broken", description: "", files: [] });
-      load();
+      loadActive(); if (tab === "history") loadHistory();
     } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
   };
 
@@ -62,38 +99,137 @@ export default function Incidents() {
       await api.post(`/incidents/${openResolve.unit.id}/resolve`, resolveForm);
       toast.success("Resuelto, unidad disponible"); setOpenResolve(null);
       setResolveForm({ description: "", files: [] });
-      load();
-    } catch (e) { toast.error("Error"); }
+      loadActive(); if (tab === "history") loadHistory();
+    } catch { toast.error("Error"); }
   };
 
   const availableUnits = units.filter((u) => u.status === "available");
 
+  const filterMatName = useMemo(() => materials.find((m) => m.id === filterMaterial)?.name, [filterMaterial, materials]);
+  const filterUnitRef = useMemo(() => units.find((u) => u.id === filterUnit)?.reference, [filterUnit, units]);
+
+  const totalReports = logs.filter((l) => l.type === "report").length;
+  const totalResolves = logs.filter((l) => l.type === "resolve").length;
+
   return (
     <div data-testid="incidents-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
-        <div><h2 className="page-title">Incidencias</h2><p className="page-sub">{list.length} unidades en avería o reparación</p></div>
+        <div>
+          <h2 className="page-title">Incidencias</h2>
+          <p className="page-sub">{list.length} unidades activas en avería o reparación</p>
+        </div>
         <Button onClick={() => setOpenNew(true)} style={{ background: "var(--accent)" }} data-testid="new-incident-btn"><Plus size={16} /> Reportar avería</Button>
       </div>
 
-      {list.length === 0 ? (
-        <div className="card-paper" style={{ textAlign: "center", padding: 60, color: "var(--ink-mute)" }}>
-          <Wrench size={32} style={{ marginBottom: 10, opacity: 0.4 }} /><br />
-          Sin incidencias. Todo el inventario está disponible.
-        </div>
-      ) : (
-        <div style={{ display: "grid", gap: 12 }}>
-          {list.map((it) => (
-            <div key={it.unit.id} className="card-paper" style={{ display: "grid", gridTemplateColumns: "120px 1fr 130px 120px 110px", gap: 14, alignItems: "center" }}>
-              <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>{it.unit.reference}</span>
-              <div>
-                <div style={{ fontWeight: 600 }}>{it.material?.name || "—"}</div>
-                {it.latest && <div style={{ fontSize: 12, color: "var(--ink-mute)", marginTop: 4 }}>{it.latest.description}</div>}
+      <div style={{ display: "flex", gap: 4, marginBottom: 18, borderBottom: "1px solid var(--line)" }}>
+        <TabBtn active={tab === "active"} onClick={() => setTab("active")} testid="tab-active">Activas ({list.length})</TabBtn>
+        <TabBtn active={tab === "history"} onClick={() => setTab("history")} testid="tab-history">Historial</TabBtn>
+      </div>
+
+      {tab === "active" ? (
+        list.length === 0 ? (
+          <div className="card-paper" style={{ textAlign: "center", padding: 60, color: "var(--ink-mute)" }}>
+            <Wrench size={32} style={{ marginBottom: 10, opacity: 0.4 }} /><br />
+            Sin incidencias activas. Todo el inventario está disponible.
+          </div>
+        ) : (
+          <div style={{ display: "grid", gap: 12 }}>
+            {list.map((it) => (
+              <div key={it.unit.id} className="card-paper" style={{ display: "grid", gridTemplateColumns: "120px 1fr 130px 120px 110px", gap: 14, alignItems: "center" }}>
+                <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>{it.unit.reference}</span>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{it.material?.name || "—"}</div>
+                  {it.latest && <div style={{ fontSize: 12, color: "var(--ink-mute)", marginTop: 4 }}>{it.latest.description}</div>}
+                </div>
+                <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: it.unit.status === "broken" ? "#fee2e2" : "#fef3c7", color: it.unit.status === "broken" ? "#991b1b" : "#92400e", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>{it.unit.status === "broken" ? "AVERIADO" : "REPARACIÓN"}</span>
+                <Button size="sm" variant="outline" onClick={() => showHistory(it)}>Histórico</Button>
+                <Button size="sm" onClick={() => setOpenResolve(it)} style={{ background: "var(--good)" }}>Resolver</Button>
               </div>
-              <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: it.unit.status === "broken" ? "#fee2e2" : "#fef3c7", color: it.unit.status === "broken" ? "#991b1b" : "#92400e", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>{it.unit.status === "broken" ? "AVERIADO" : "REPARACIÓN"}</span>
-              <Button size="sm" variant="outline" onClick={() => showHistory(it)}>Histórico</Button>
-              <Button size="sm" onClick={() => setOpenResolve(it)} style={{ background: "var(--good)" }}>Resolver</Button>
+            ))}
+          </div>
+        )
+      ) : (
+        <div>
+          <div className="card-paper" style={{ marginBottom: 14, padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, fontSize: 11, color: "var(--ink-mute)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "JetBrains Mono, monospace" }}>
+              <Filter size={12} /> Filtros
             </div>
-          ))}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 200px 120px", gap: 10, alignItems: "end" }}>
+              <Lbl label="Material">
+                <SearchSelect
+                  placeholder="Cualquiera"
+                  value={filterMaterial}
+                  onChange={(v) => { setFilterMaterial(v); setFilterUnit(""); }}
+                  allowClear
+                  options={materials.map((m) => ({ value: m.id, label: `${m.reference} · ${m.name}`, sub: m.category, keywords: m.name }))}
+                />
+              </Lbl>
+              <Lbl label="Unidad concreta">
+                <SearchSelect
+                  placeholder="Cualquier unidad"
+                  value={filterUnit}
+                  onChange={setFilterUnit}
+                  allowClear
+                  options={units.filter((u) => !filterMaterial || u.material_id === filterMaterial).map((u) => {
+                    const m = materials.find((mm) => mm.id === u.material_id);
+                    return { value: u.id, label: u.reference, sub: m?.name || "", keywords: m?.name || "" };
+                  })}
+                />
+              </Lbl>
+              <Lbl label="Tipo">
+                <Select value={filterType} onValueChange={setFilterType}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos</SelectItem>
+                    <SelectItem value="report">Solo reportes</SelectItem>
+                    <SelectItem value="update">Solo actualizaciones</SelectItem>
+                    <SelectItem value="resolve">Solo resoluciones</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Lbl>
+              {(filterMaterial || filterUnit || filterType !== "all") && (
+                <Button variant="outline" size="sm" onClick={() => { setFilterMaterial(""); setFilterUnit(""); setFilterType("all"); }}>Limpiar</Button>
+              )}
+            </div>
+            {(filterMaterial || filterUnit) && (
+              <div style={{ marginTop: 12, fontSize: 12, color: "var(--ink-mute)" }}>
+                {filterMaterial && <>Filtrando por material <b>{filterMatName}</b>. </>}
+                {filterUnit && <>Unidad <b>{filterUnitRef}</b>. </>}
+                {totalReports} reporte(s) · {totalResolves} resolución(es).
+              </div>
+            )}
+          </div>
+
+          {logs.length === 0 ? (
+            <div className="card-paper" style={{ textAlign: "center", padding: 60, color: "var(--ink-mute)" }}>
+              Sin registros que coincidan con los filtros.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 10 }}>
+              {logs.map((h) => {
+                const t = TYPE_LABELS[h.type] || { label: h.type, color: "var(--ink-mute)", bg: "#f5f5f4" };
+                return (
+                  <div key={h.id} className="card-paper" style={{ padding: 14 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "120px 110px 1fr 160px", gap: 12, alignItems: "center", marginBottom: 6 }}>
+                      <span style={{ padding: "3px 10px", borderRadius: 999, fontSize: 10, fontWeight: 700, background: t.bg, color: t.color, textTransform: "uppercase", letterSpacing: "0.08em", textAlign: "center" }}>{t.label} · {h.status}</span>
+                      <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{h.unit?.reference || "—"}</span>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>{h.material?.name || "—"}</div>
+                        <div style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace" }}>{h.material?.reference}</div>
+                      </div>
+                      <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)", textAlign: "right" }}>{new Date(h.created_at).toLocaleString("es-ES")}</span>
+                    </div>
+                    {h.description && <p style={{ fontSize: 13, margin: "6px 0", paddingLeft: 134, color: "var(--ink-soft)" }}>{h.description}</p>}
+                    {h.files && h.files.length > 0 && (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, paddingLeft: 134 }}>
+                        {h.files.map((f, i) => <FilePill key={i} file={f} />)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -181,6 +317,29 @@ export default function Incidents() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function TabBtn({ active, onClick, children, testid }) {
+  return (
+    <button
+      onClick={onClick}
+      data-testid={testid}
+      style={{
+        background: "none",
+        border: "none",
+        padding: "10px 18px",
+        cursor: "pointer",
+        fontSize: 13,
+        fontWeight: active ? 700 : 500,
+        color: active ? "var(--accent)" : "var(--ink-mute)",
+        borderBottom: active ? "2px solid var(--accent)" : "2px solid transparent",
+        marginBottom: -1,
+        fontFamily: "inherit",
+      }}
+    >
+      {children}
+    </button>
   );
 }
 

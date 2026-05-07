@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import { Plus, Search, Trash2, Pencil, ChevronDown, ChevronRight, Settings } from "lucide-react";
+import { Plus, Search, Trash2, Pencil, ChevronDown, ChevronRight, Settings, Wrench } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
@@ -201,7 +202,19 @@ export default function Inventory() {
                         {hasUnitRefs ? (isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />) : "·"}
                       </button>
                       <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{it.reference}</span>
-                      <div style={{ fontWeight: 500 }}>{it.name}</div>
+                      <div style={{ fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}>
+                        <span>{it.name}</span>
+                        {(it.incident_count || 0) > 0 && (
+                          <Link
+                            to={`/incidencias?material_id=${it.id}`}
+                            data-testid={`incident-badge-${it.reference}`}
+                            title={`Ver ${it.incident_count} incidencia(s) de este material`}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "#fee2e2", color: "#991b1b", fontSize: 11, padding: "2px 8px", borderRadius: 999, fontWeight: 600, textDecoration: "none", fontFamily: "JetBrains Mono, monospace" }}
+                          >
+                            <Wrench size={11} /> {it.incident_count}
+                          </Link>
+                        )}
+                      </div>
                       <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13 }}>{it.quantity} unid.</div>
                       <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: available < 1 ? "var(--bad)" : "var(--good)" }}>Disp: {available}</div>
                       <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>

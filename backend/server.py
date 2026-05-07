@@ -540,10 +540,12 @@ async def list_materials(category: Optional[str] = None, q: Optional[str] = None
             {"id": {"$in": unit_mat_ids}},
         ]
     items = await db.materials.find(query, PROJ).sort("reference", 1).to_list(5000)
-    # enrich with blocked + units count
+    # enrich with blocked + units count + incident count
     for it in items:
         it["blocked"] = await material_blocked_count(it["id"])
         it["unit_count"] = await db.units.count_documents({"material_id": it["id"]})
+        unit_ids = [u["id"] for u in await db.units.find({"material_id": it["id"]}, PROJ).to_list(2000)]
+        it["incident_count"] = await db.incident_logs.count_documents({"unit_id": {"$in": unit_ids}, "type": "report"}) if unit_ids else 0
     return items
 
 
@@ -1091,6 +1093,40 @@ async def list_incidents():
             "latest": latest[0] if latest else None,
         })
     return out
+
+
+@api_router.get("/incident-logs")
+async def list_incident_logs(unit_id: Optional[str] = None, material_id: Optional[str] = None, type: Optional[str] = None):
+    """Flat list of all incident logs with material info, optionally filtered."""
+    q = {}
+    if unit_id:
+        q["unit_id"] = unit_id
+    if type:
+        q["type"] = type
+    if material_id:
+        unit_ids = [u["id"] for u in await db.units.find({"material_id": material_id}, PROJ).to_list(5000)]
+        q["unit_id"] = {"$in": unit_ids}
+    logs = await db.incident_logs.find(q, PROJ).sort("created_at", -1).to_list(2000)
+    # enrich with unit + material info
+    cache_units: Dict[str, dict] = {}
+    cache_mats: Dict[str, dict] = {}
+    for log in logs:
+        uid = log.get("unit_id")
+        u = cache_units.get(uid)
+        if u is None:
+            u = await db.units.find_one({"id": uid}, PROJ)
+            cache_units[uid] = u or {}
+        log["unit"] = {"id": u.get("id"), "reference": u.get("reference"), "status": u.get("status")} if u else None
+        mid = u.get("material_id") if u else None
+        if mid:
+            m = cache_mats.get(mid)
+            if m is None:
+                m = await db.materials.find_one({"id": mid}, PROJ)
+                cache_mats[mid] = m or {}
+            log["material"] = {"id": m.get("id"), "name": m.get("name"), "category": m.get("category"), "reference": m.get("reference")} if m else None
+        else:
+            log["material"] = None
+    return logs
 
 
 @api_router.get("/units/{unit_id}/history")
