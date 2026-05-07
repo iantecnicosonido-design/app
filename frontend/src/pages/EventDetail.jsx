@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, API, formatDate } from "../lib/api";
-import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package } from "lucide-react";
+import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -37,6 +37,11 @@ export default function EventDetail() {
   const [availability, setAvailability] = useState(null);
   const [rentForm, setRentForm] = useState({ name: "", quantity: 1, provider_id: "", provider_name: "", notes: "" });
   const [edit, setEdit] = useState(null);
+  const [editBlockedOpen, setEditBlockedOpen] = useState(false);
+  const [editBlockedMat, setEditBlockedMat] = useState(null);
+  const [editBlockedAvail, setEditBlockedAvail] = useState(null);
+  const [editBlockedSel, setEditBlockedSel] = useState(new Set());
+  const [editBlockedQty, setEditBlockedQty] = useState(1);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -96,6 +101,56 @@ export default function EventDetail() {
       api.get("/materials").then((rr) => setMaterials(rr.data));
       toast.success("Desbloqueado");
     } catch { toast.error("Error"); }
+  };
+
+  const startEditBlocked = async (m) => {
+    setEditBlockedMat(m);
+    const cat = categories.find((c) => c.key === m.category);
+    const hasUnitRefs = cat?.has_unit_refs !== false;
+    if (hasUnitRefs) {
+      try {
+        const r = await api.get(`/events/${id}/availability`, { params: { material_id: m.material_id } });
+        setEditBlockedAvail(r.data);
+      } catch { setEditBlockedAvail({ units: [], available_count: 0 }); }
+      setEditBlockedSel(new Set((m.units || []).map((u) => u.unit_id)));
+    } else {
+      setEditBlockedQty(m.units?.length || 1);
+    }
+    setEditBlockedOpen(true);
+  };
+
+  const saveEditBlocked = async () => {
+    if (!editBlockedMat) return;
+    const cat = categories.find((c) => c.key === editBlockedMat.category);
+    const hasUnitRefs = cat?.has_unit_refs !== false;
+    try {
+      if (hasUnitRefs) {
+        const ids = Array.from(editBlockedSel);
+        if (ids.length === 0) {
+          await api.delete(`/events/${id}/materials/${editBlockedMat.material_id}`);
+        } else {
+          await api.post(`/events/${id}/materials`, { material_id: editBlockedMat.material_id, unit_ids: ids });
+        }
+      } else {
+        if (editBlockedQty < 1) {
+          await api.delete(`/events/${id}/materials/${editBlockedMat.material_id}`);
+        } else {
+          await api.post(`/events/${id}/materials`, { material_id: editBlockedMat.material_id, quantity: editBlockedQty });
+        }
+      }
+      const r = await api.get(`/events/${id}`);
+      setEv(r.data);
+      api.get("/materials").then((rr) => setMaterials(rr.data));
+      setEditBlockedOpen(false);
+      setEditBlockedMat(null);
+      toast.success("Actualizado");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const toggleEditUnit = (uid) => {
+    const next = new Set(editBlockedSel);
+    if (next.has(uid)) next.delete(uid); else next.add(uid);
+    setEditBlockedSel(next);
   };
 
   const applyPack = async (pid) => {
@@ -224,12 +279,13 @@ export default function EventDetail() {
                 <div style={{ marginBottom: 8 }}><span className={`cat-pill cat-${c.key}`}>{c.label}</span></div>
                 {grouped[c.key].map((m) => (
                   <div key={m.material_id} style={{ borderBottom: "1px solid var(--line)", padding: "10px 4px" }}>
-                    <div className="row-hover" style={{ display: "grid", gridTemplateColumns: "100px 1fr 80px 60px", alignItems: "center", gap: 8 }}>
+                    <div className="row-hover" style={{ display: "grid", gridTemplateColumns: "100px 1fr 80px 100px", alignItems: "center", gap: 8 }}>
                       <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{m.reference || "—"}</span>
                       <div style={{ fontWeight: 500 }}>{m.name}</div>
                       <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13 }}>x{m.units?.length || 0}</div>
-                      <div style={{ textAlign: "right" }}>
-                        {!isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)}><Trash2 size={14} /></Button>}
+                      <div style={{ textAlign: "right", display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                        {!isClosed && <Button size="icon" variant="ghost" onClick={() => startEditBlocked(m)} title="Editar unidades"><Pencil size={14} /></Button>}
+                        {!isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)} title="Quitar todo"><Trash2 size={14} /></Button>}
                       </div>
                     </div>
                     {c.has_unit_refs !== false && (
@@ -374,6 +430,69 @@ export default function EventDetail() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setRentOpen(false)}>Cancelar</Button>
             <Button onClick={addRental} style={{ background: "var(--accent)" }}>Añadir</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      {/* Edit blocked material */}
+      <Dialog open={editBlockedOpen} onOpenChange={setEditBlockedOpen}>
+        <DialogContent style={{ maxWidth: 600, maxHeight: "92vh", overflowY: "auto" }} data-testid="edit-blocked-dialog">
+          <DialogHeader>
+            <DialogTitle>Editar material bloqueado</DialogTitle>
+          </DialogHeader>
+          {editBlockedMat && (() => {
+            const cat = categories.find((c) => c.key === editBlockedMat.category);
+            const hasUnitRefs = cat?.has_unit_refs !== false;
+            return (
+              <div>
+                <div style={{ padding: 12, background: "#fffbeb", border: "1px solid var(--line)", borderRadius: 8, marginBottom: 14 }}>
+                  <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{editBlockedMat.reference}</div>
+                  <div style={{ fontWeight: 600 }}>{editBlockedMat.name}</div>
+                  <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>{cat?.label || editBlockedMat.category}</div>
+                </div>
+                {hasUnitRefs ? (
+                  <div>
+                    <p style={{ fontSize: 12, color: "var(--ink-mute)", marginBottom: 10 }}>
+                      Marca o desmarca unidades. {editBlockedSel.size} seleccionada(s).
+                    </p>
+                    <div style={{ maxHeight: 380, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
+                      {(editBlockedAvail?.units || []).map((u) => {
+                        const checked = editBlockedSel.has(u.id);
+                        const blockedHere = (editBlockedMat.units || []).some((x) => x.unit_id === u.id);
+                        const disabled = !u.available && !blockedHere;
+                        return (
+                          <label key={u.id} style={{ display: "grid", gridTemplateColumns: "20px 110px 1fr 90px", gap: 8, padding: "8px 12px", borderBottom: "1px solid var(--line)", alignItems: "center", cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? 0.45 : 1, background: checked ? "#fef3c7" : "transparent" }}>
+                            <input type="checkbox" checked={checked} disabled={disabled} onChange={() => toggleEditUnit(u.id)} data-testid={`edit-unit-${u.reference}`} />
+                            <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{u.reference}</span>
+                            <span style={{ fontSize: 11, color: "var(--ink-mute)" }}>
+                              {(u.subitems || []).length > 0 && `incluye ${u.subitems.length} subítem(s)`}
+                            </span>
+                            <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", color: u.available ? "var(--good)" : "var(--bad)", textAlign: "right" }}>
+                              {u.available ? (blockedHere ? "actual" : "disp.") : (u.reason || "no disp.")}
+                            </span>
+                          </label>
+                        );
+                      })}
+                      {(!editBlockedAvail?.units || editBlockedAvail.units.length === 0) && (
+                        <div style={{ padding: 14, color: "var(--ink-mute)", fontSize: 13 }}>Sin unidades.</div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <p style={{ fontSize: 12, color: "var(--ink-mute)", marginBottom: 10 }}>
+                      Esta categoría no usa numeración por unidad. Ajusta la cantidad bloqueada.
+                    </p>
+                    <Lbl label="Cantidad">
+                      <Input type="number" min={0} value={editBlockedQty} onChange={(e) => setEditBlockedQty(parseInt(e.target.value || "0"))} data-testid="edit-blocked-qty" />
+                    </Lbl>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditBlockedOpen(false)}>Cancelar</Button>
+            <Button onClick={saveEditBlocked} style={{ background: "var(--accent)" }} data-testid="save-edit-blocked-btn"><Save size={14} /> Guardar cambios</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
