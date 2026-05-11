@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Depends, Request, Query
 from fastapi.responses import StreamingResponse, Response, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -242,6 +242,23 @@ class EventVehicle(BaseModel):
     notes: str = ""
 
 
+class ExpenseFile(BaseModel):
+    file_id: str
+    name: str = ""
+    content_type: str = ""
+
+
+class Expense(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    description: str
+    amount: float
+    currency: str = "EUR"
+    files: List[ExpenseFile] = []
+    created_by: str = ""
+    created_by_name: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
 class Event(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -268,6 +285,9 @@ class Event(BaseModel):
     rentals: List[RentalItem] = []
     vehicles: List[EventVehicle] = []
     assigned_technicians: List[str] = []
+    responsible_technician_id: Optional[str] = None
+    tech_notes: Dict[str, str] = Field(default_factory=dict)
+    expenses: List[Expense] = []
     prep_status: Literal["pendiente", "preparado"] = "pendiente"
     prep_checks: List[str] = []  # unit ids marked as prepared by almacen
     prep_locked_at: Optional[str] = None
@@ -298,6 +318,8 @@ class EventCreate(BaseModel):
     dismount_start_dt: Optional[str] = None
     dismount_end_dt: Optional[str] = None
     assigned_technicians: List[str] = []
+    responsible_technician_id: Optional[str] = None
+    tech_notes: Optional[Dict[str, str]] = None
 
 
 class EventUpdate(EventCreate):
@@ -436,6 +458,60 @@ class PackCreate(BaseModel):
     name: str
     description: str = ""
     items: List[PackItem] = []
+
+
+# ---------- Independent tasks ----------
+class Task(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    kind: Literal["transport", "warehouse", "visit", "other"] = "other"
+    start_dt: str
+    end_dt: Optional[str] = None
+    location: str = ""
+    notes: str = ""
+    assigned_technicians: List[str] = []
+    related_event_id: Optional[str] = None
+    files: List[ExpenseFile] = []
+    created_by: str = ""
+    created_by_name: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class TaskCreate(BaseModel):
+    title: str
+    kind: Literal["transport", "warehouse", "visit", "other"] = "other"
+    start_dt: str
+    end_dt: Optional[str] = None
+    location: str = ""
+    notes: str = ""
+    assigned_technicians: List[str] = []
+    related_event_id: Optional[str] = None
+    files: List[ExpenseFile] = []
+
+
+class TaskUpdate(BaseModel):
+    title: Optional[str] = None
+    kind: Optional[Literal["transport", "warehouse", "visit", "other"]] = None
+    start_dt: Optional[str] = None
+    end_dt: Optional[str] = None
+    location: Optional[str] = None
+    notes: Optional[str] = None
+    assigned_technicians: Optional[List[str]] = None
+    related_event_id: Optional[str] = None
+    files: Optional[List[ExpenseFile]] = None
+
+
+class ExpenseCreate(BaseModel):
+    description: str
+    amount: float
+    currency: str = "EUR"
+    files: List[ExpenseFile] = []
+
+
+class TechAssignmentRequest(BaseModel):
+    assigned_technicians: List[str] = []
+    responsible_technician_id: Optional[str] = None
+    tech_notes: Optional[Dict[str, str]] = None
 
 
 # ---------- Helpers ----------
@@ -891,12 +967,22 @@ async def update_event(eid: str, payload: EventUpdate, _u: dict = Depends(requir
                 public_url = os.environ.get("APP_PUBLIC_URL", "")
                 ev_url = f"{public_url}/eventos/{eid}"
                 date_str = res.get("event_date") or res.get("setup_date") or ""
+                tech_note = (res.get("tech_notes") or {}).get(tid) or ""
+                note_html = ""
+                if tech_note:
+                    safe_note = tech_note.replace("\n", "<br>")
+                    note_html = (
+                        "<br><br><div style='border-left:3px solid #b45309;padding:8px 12px;"
+                        "background:#fffbeb;color:#78350f;'>"
+                        f"<b>Nota privada del productor:</b><br>{safe_note}</div>"
+                    )
                 body = (f"Hola {tech.get('name') or tech['email']}, has sido asignado al evento "
                         f"<b>{res.get('name','')}</b>.<br><br>"
                         f"<b>Fecha:</b> {date_str}<br>"
                         f"<b>Ubicación:</b> {res.get('location') or '—'}<br>"
                         f"<b>Cliente:</b> {res.get('client_name') or '—'}<br>"
-                        f"<b>Horarios:</b> {res.get('schedule') or '—'}")
+                        f"<b>Horarios:</b> {res.get('schedule') or '—'}"
+                        f"{note_html}")
                 html = render_basic(
                     title="Te han asignado a un evento",
                     body_html=body,
@@ -1787,6 +1873,199 @@ async def download_file(path: str):
     return Response(content=data, media_type=rec.get("content_type", ct))
 
 
+# ---------- Technician assignment with notes + responsible ----------
+@api_router.post("/events/{eid}/technicians")
+async def assign_technicians(eid: str, payload: TechAssignmentRequest, user: dict = Depends(require_productor)):
+    """Assign techs + optionally set per-tech private notes and a responsible technician."""
+    prev = await db.events.find_one({"id": eid}, PROJ)
+    if not prev:
+        raise HTTPException(404, "Event not found")
+    tech_ids = list(dict.fromkeys(payload.assigned_technicians or []))
+    valid_users = await db.users.find({"id": {"$in": tech_ids}, "active": True}, PROJ).to_list(500)
+    valid_ids = {u["id"] for u in valid_users}
+    tech_ids = [t for t in tech_ids if t in valid_ids]
+    update: Dict[str, Any] = {"assigned_technicians": tech_ids}
+    resp = payload.responsible_technician_id
+    if resp and resp not in tech_ids:
+        raise HTTPException(400, "El responsable debe estar entre los técnicos asignados")
+    update["responsible_technician_id"] = resp
+    if payload.tech_notes is not None:
+        update["tech_notes"] = {tid: note for tid, note in payload.tech_notes.items() if tid in tech_ids}
+    else:
+        existing_notes = prev.get("tech_notes") or {}
+        update["tech_notes"] = {tid: n for tid, n in existing_notes.items() if tid in tech_ids}
+    await db.events.update_one({"id": eid}, {"$set": update})
+    res = await db.events.find_one({"id": eid}, PROJ)
+    try:
+        prev_set = set(prev.get("assigned_technicians") or [])
+        new_set = set(res.get("assigned_technicians") or [])
+        added = new_set - prev_set
+        for tid in added:
+            tech = next((u for u in valid_users if u["id"] == tid), None)
+            if not tech:
+                continue
+            public_url = os.environ.get("APP_PUBLIC_URL", "")
+            ev_url = f"{public_url}/eventos/{eid}"
+            date_str = res.get("event_date") or res.get("setup_date") or ""
+            tech_note = (res.get("tech_notes") or {}).get(tid) or ""
+            note_html = ""
+            if tech_note:
+                safe_note = tech_note.replace("\n", "<br>")
+                note_html = (
+                    "<br><br><div style='border-left:3px solid #b45309;padding:8px 12px;"
+                    "background:#fffbeb;color:#78350f;'>"
+                    f"<b>Nota privada del productor:</b><br>{safe_note}</div>"
+                )
+            is_resp = res.get("responsible_technician_id") == tid
+            resp_html = "<br><br><b>Has sido marcado como responsable del evento.</b>" if is_resp else ""
+            body = (f"Hola {tech.get('name') or tech['email']}, has sido asignado al evento "
+                    f"<b>{res.get('name','')}</b>.<br><br>"
+                    f"<b>Fecha:</b> {date_str}<br>"
+                    f"<b>Ubicación:</b> {res.get('location') or '—'}<br>"
+                    f"<b>Cliente:</b> {res.get('client_name') or '—'}<br>"
+                    f"<b>Horarios:</b> {res.get('schedule') or '—'}"
+                    f"{resp_html}{note_html}")
+            html = render_basic(title="Te han asignado a un evento", body_html=body,
+                                cta_label="Ver detalles", cta_url=ev_url, footer="Edison Rent")
+            await send_email(tech["email"], f"Asignación: {res.get('name','evento')}", html)
+    except Exception as e:
+        logger.error("technician notify error: %s", e)
+    return res
+
+
+# ---------- Expenses (bolos only) ----------
+def _can_view_expenses(ev: dict, user: dict) -> bool:
+    if user.get("role") == "productor":
+        return True
+    if user.get("role") == "tecnico" and ev.get("responsible_technician_id") == user["id"]:
+        return True
+    return False
+
+
+@api_router.get("/events/{eid}/expenses")
+async def list_expenses(eid: str, user: dict = Depends(get_current_user)):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("type") != "bolo":
+        raise HTTPException(400, "Gastos solo disponibles en bolos")
+    if not _can_view_expenses(ev, user):
+        raise HTTPException(403, "Sin permiso para ver gastos de este evento")
+    return ev.get("expenses", [])
+
+
+@api_router.post("/events/{eid}/expenses")
+async def add_expense(eid: str, payload: ExpenseCreate, user: dict = Depends(get_current_user)):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("type") != "bolo":
+        raise HTTPException(400, "Gastos solo disponibles en bolos")
+    if not _can_view_expenses(ev, user):
+        raise HTTPException(403, "Sin permiso para añadir gastos a este evento")
+    if payload.amount < 0:
+        raise HTTPException(400, "Importe inválido")
+    if not payload.description.strip():
+        raise HTTPException(400, "Descripción obligatoria")
+    exp = Expense(
+        description=payload.description.strip(),
+        amount=float(payload.amount),
+        currency=payload.currency or "EUR",
+        files=list(payload.files or []),
+        created_by=user["id"],
+        created_by_name=user.get("name") or user.get("email", ""),
+    )
+    await db.events.update_one({"id": eid}, {"$push": {"expenses": exp.model_dump()}})
+    return exp
+
+
+@api_router.delete("/events/{eid}/expenses/{xid}")
+async def delete_expense(eid: str, xid: str, user: dict = Depends(get_current_user)):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("type") != "bolo":
+        raise HTTPException(400, "Gastos solo disponibles en bolos")
+    if not _can_view_expenses(ev, user):
+        raise HTTPException(403, "Sin permiso")
+    exp = next((e for e in (ev.get("expenses") or []) if e.get("id") == xid), None)
+    if not exp:
+        raise HTTPException(404, "Gasto no encontrado")
+    if user.get("role") != "productor" and exp.get("created_by") != user["id"]:
+        raise HTTPException(403, "Solo el productor o el creador puede eliminar el gasto")
+    await db.events.update_one({"id": eid}, {"$pull": {"expenses": {"id": xid}}})
+    return {"ok": True}
+
+
+# ---------- Tasks (independent technician calendar items) ----------
+@api_router.get("/tasks")
+async def list_tasks(
+    from_: Optional[str] = Query(None, alias="from"),
+    to: Optional[str] = None,
+    technician_id: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    q: Dict[str, Any] = {}
+    if technician_id:
+        q["assigned_technicians"] = technician_id
+    if from_ or to:
+        rng: Dict[str, Any] = {}
+        if from_:
+            rng["$gte"] = from_
+        if to:
+            rng["$lte"] = to
+        q["start_dt"] = rng
+    items = await db.tasks.find(q, PROJ).sort("start_dt", 1).to_list(2000)
+    if user.get("role") == "tecnico":
+        items = [t for t in items if user["id"] in (t.get("assigned_technicians") or [])]
+    return items
+
+
+@api_router.post("/tasks", response_model=Task)
+async def create_task(payload: TaskCreate, user: dict = Depends(require_productor)):
+    if not payload.title.strip():
+        raise HTTPException(400, "Título obligatorio")
+    if not payload.start_dt:
+        raise HTTPException(400, "Fecha/hora de inicio obligatoria")
+    t = Task(
+        title=payload.title.strip(),
+        kind=payload.kind,
+        start_dt=payload.start_dt,
+        end_dt=payload.end_dt,
+        location=payload.location.strip(),
+        notes=payload.notes,
+        assigned_technicians=list(dict.fromkeys(payload.assigned_technicians or [])),
+        related_event_id=payload.related_event_id,
+        files=list(payload.files or []),
+        created_by=user["id"],
+        created_by_name=user.get("name") or user.get("email", ""),
+    )
+    await db.tasks.insert_one(t.model_dump())
+    return t
+
+
+@api_router.put("/tasks/{tid}", response_model=Task)
+async def update_task(tid: str, payload: TaskUpdate, _u: dict = Depends(require_productor)):
+    upd = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not upd:
+        raise HTTPException(400, "Nada que actualizar")
+    res = await db.tasks.find_one_and_update({"id": tid}, {"$set": upd},
+                                             return_document=True, projection=PROJ)
+    if not res:
+        raise HTTPException(404, "Tarea no encontrada")
+    return res
+
+
+@api_router.delete("/tasks/{tid}")
+async def delete_task(tid: str, _u: dict = Depends(require_productor)):
+    r = await db.tasks.delete_one({"id": tid})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Tarea no encontrada")
+    return {"ok": True}
+
+
+
+
 # ---------- PDF ----------
 def _fmt_dt(s):
     if not s:
@@ -2291,6 +2570,7 @@ async def seed_admin():
 
 def _public_user(u: dict) -> dict:
     return {"id": u["id"], "email": u["email"], "name": u.get("name", ""),
+            "phone": u.get("phone", ""),
             "role": u.get("role", "tecnico"), "active": u.get("active", True)}
 
 
@@ -2433,7 +2713,7 @@ async def create_user(payload: RegisterRequest, user: dict = Depends(require_rol
     if await db.users.find_one({"email": email}, PROJ):
         raise HTTPException(400, "Ya existe un usuario con ese email")
     u = User(email=email, password_hash=hash_password(payload.password),
-             name=payload.name.strip(), role=payload.role)
+             name=payload.name.strip(), phone=(payload.phone or "").strip(), role=payload.role)
     await db.users.insert_one(u.model_dump())
     # welcome email with initial password
     try:
@@ -2463,6 +2743,8 @@ async def update_user(uid: str, payload: UpdateUserRequest, user: dict = Depends
     upd = {}
     if payload.name is not None:
         upd["name"] = payload.name.strip()
+    if payload.phone is not None:
+        upd["phone"] = payload.phone.strip()
     if payload.role is not None:
         if payload.role not in ROLES:
             raise HTTPException(400, "Rol inválido")

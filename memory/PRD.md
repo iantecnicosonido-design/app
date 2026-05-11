@@ -42,6 +42,15 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Material de alquiler externo también se puede marcar como preparado (checkbox + cuenta en X/Y)
   - Nuevo endpoint `GET /events/{eid}/export-prep` genera el PDF de preparación con bloque de firma
 - ✅ Dashboard simplificado para rol Almacén (Feb 2026): solo Eventos preparados / Pendientes de preparar / Incidencias abiertas + calendario + accesos rápidos. Listado X/Y por evento con enlace directo a la hoja de preparación. Nuevos campos `prep_ready` y `prep_pending` en `/api/stats`
+- ✅ Notas privadas Productor → Técnico por evento (Feb 2026)
+  - Modal de asignación de técnicos rediseñado: checkbox + radio "Responsable" + textarea de nota privada por técnico
+  - Nota incluida en el email de asignación
+  - Visible al técnico en su vista del evento (solo lectura)
+  - Endpoint dedicado `POST /events/{eid}/technicians` con `{assigned_technicians, responsible_technician_id, tech_notes}`
+- ✅ Teléfono opcional en cuentas de usuario (Feb 2026): campo `phone` en User; visible en lista de usuarios y en chips de técnicos asignados
+- ✅ Tareas independientes en calendario (Feb 2026): nuevo modelo `Task` (transporte / trabajo en nave / visita / otro) con fecha/hora, ubicación, notas, técnicos asignados, evento asociado opcional, archivos adjuntos. Visibles en el calendario de Eventos en chips morados. Productor crea/edita; técnico solo ve las suyas
+- ✅ Apartado Gastos en bolos (Feb 2026): solo accesible para Productor y Técnico Responsable del evento. Cabecera con datos fiscales EDISON RENT SL · B60800301 y mensaje rojo "RECUERDE SOLICITAR FACTURA". Importe manual + adjuntos (archivo o cámara móvil con `capture="environment"`). Total agregado
+- ✅ Técnico Responsable: el productor marca a uno de entre los asignados; mostrado con badge dorado ⭐ en la lista de técnicos del evento; única persona técnica con permiso para añadir gastos
 - ✅ Tests automatizados pasados (24/24 backend, 7/7 frontend)
 
 ## Backlog

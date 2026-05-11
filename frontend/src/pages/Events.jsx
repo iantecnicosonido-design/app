@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, formatDate } from "../lib/api";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, CalendarDays, Tag, Search, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, CalendarDays, Tag, Search, ChevronLeft, ChevronRight, Truck } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { toast } from "sonner";
 import { useAuth, can } from "../lib/auth";
+import { TaskDialog } from "../components/TaskDialog";
 
 const empty = {
   name: "", type: "alquiler", client_name: "", client_contact: "", reference: "",
@@ -36,8 +37,33 @@ export default function Events() {
   const [calYear, setCalYear] = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
 
+  // Tasks (productor only can create; everyone can see in calendar)
+  const [tasks, setTasks] = useState([]);
+  const [technicians, setTechnicians] = useState([]);
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [taskEditing, setTaskEditing] = useState(null);
+  const [taskDefaultDate, setTaskDefaultDate] = useState(null);
+
   const load = async () => setEvents((await api.get("/events")).data);
-  useEffect(() => { load(); }, []);
+  const loadTasks = async () => {
+    try { setTasks((await api.get("/tasks")).data || []); } catch { /* ignore */ }
+  };
+  useEffect(() => {
+    load();
+    loadTasks();
+    api.get("/technicians").then((r) => setTechnicians(r.data || [])).catch(() => {});
+  }, []);
+
+  const openCreateTask = (dateStr) => {
+    setTaskEditing(null);
+    setTaskDefaultDate(dateStr || null);
+    setTaskOpen(true);
+  };
+  const openEditTask = (t) => {
+    setTaskEditing(t);
+    setTaskDefaultDate(null);
+    setTaskOpen(true);
+  };
 
   const create = async () => {
     if (!form.name.trim()) { toast.error("Nombre obligatorio"); return; }
@@ -65,7 +91,12 @@ export default function Events() {
           <h2 className="page-title">Eventos</h2>
           <p className="page-sub">{events.length} totales · {events.filter((e) => e.status === "abierto").length} abiertos</p>
         </div>
-        {canCreate && <Button onClick={() => setOpen(true)} style={{ background: "var(--accent)" }} data-testid="new-event-btn"><Plus size={16} /> Nuevo evento</Button>}
+        {canCreate && (
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button onClick={() => openCreateTask(null)} variant="outline" data-testid="new-task-btn"><Truck size={16} /> Nueva tarea</Button>
+            <Button onClick={() => setOpen(true)} style={{ background: "var(--accent)" }} data-testid="new-event-btn"><Plus size={16} /> Nuevo evento</Button>
+          </div>
+        )}
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -111,13 +142,26 @@ export default function Events() {
         </TabsContent>
 
         <TabsContent value="cal">
-          <MonthCalendar year={calYear} month={calMonth} events={events}
+          <MonthCalendar year={calYear} month={calMonth} events={events} tasks={tasks}
             onPrev={() => { if (calMonth === 0) { setCalYear(calYear - 1); setCalMonth(11); } else setCalMonth(calMonth - 1); }}
             onNext={() => { if (calMonth === 11) { setCalYear(calYear + 1); setCalMonth(0); } else setCalMonth(calMonth + 1); }}
             onToday={() => { setCalYear(today.getFullYear()); setCalMonth(today.getMonth()); }}
+            onCreateTask={canCreate ? openCreateTask : null}
+            onEditTask={canCreate ? openEditTask : null}
+            technicians={technicians}
           />
         </TabsContent>
       </Tabs>
+
+      <TaskDialog
+        open={taskOpen}
+        onClose={() => { setTaskOpen(false); setTaskEditing(null); }}
+        task={taskEditing}
+        defaultDate={taskDefaultDate}
+        technicians={technicians}
+        events={events}
+        onSaved={loadTasks}
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent style={{ maxWidth: 760, maxHeight: "92vh", overflowY: "auto" }} data-testid="event-dialog">
@@ -185,11 +229,11 @@ function Field({ label, children, full, required }) {
   );
 }
 
-export function MonthCalendar({ year, month, events, onPrev, onNext, onToday, compact }) {
+export function MonthCalendar({ year, month, events, tasks, onPrev, onNext, onToday, compact, onCreateTask, onEditTask, technicians }) {
   const navigate = useNavigate();
   const monthStart = new Date(year, month, 1);
   const monthEnd = new Date(year, month + 1, 0);
-  const startDow = (monthStart.getDay() + 6) % 7; // Mon=0 ... Sun=6
+  const startDow = (monthStart.getDay() + 6) % 7;
   const days = [];
   for (let i = 0; i < startDow; i++) days.push(null);
   for (let d = 1; d <= monthEnd.getDate(); d++) days.push(d);
@@ -220,8 +264,23 @@ export function MonthCalendar({ year, month, events, onPrev, onNext, onToday, co
     return map;
   }, [events, year, month]);
 
-  const cellHeight = compact ? 70 : 110;
+  const tasksByDay = useMemo(() => {
+    const map = {};
+    (tasks || []).forEach((t) => {
+      if (!t.start_dt) return;
+      const sd = new Date(t.start_dt);
+      if (sd.getMonth() === month && sd.getFullYear() === year) {
+        const d = sd.getDate();
+        (map[d] ||= []).push(t);
+      }
+    });
+    return map;
+  }, [tasks, year, month]);
+
+  const cellHeight = compact ? 70 : 130;
   const today = new Date();
+
+  const kindLabel = (k) => ({ transport: "🚚", warehouse: "🛠", visit: "📍", other: "•" }[k] || "•");
 
   return (
     <div className="card-paper" style={{ padding: 0, overflow: "hidden" }} data-testid="month-calendar">
@@ -232,7 +291,11 @@ export function MonthCalendar({ year, month, events, onPrev, onNext, onToday, co
           <Button variant="ghost" size="sm" onClick={onToday}>Hoy</Button>
         </div>
         <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, fontFamily: "JetBrains Mono, monospace", letterSpacing: "0.02em" }}>{MONTHS_ES[month]} {year}</h3>
-        <div style={{ width: 90 }} />
+        <div style={{ display: "flex", gap: 10, fontSize: 11, color: "var(--ink-mute)", alignItems: "center", flexWrap: "wrap" }}>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 2, marginRight: 4 }} />Bolo</span>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 2, marginRight: 4 }} />Alquiler</span>
+          <span><span style={{ display: "inline-block", width: 10, height: 10, background: "#ede9fe", border: "1px solid #c4b5fd", borderRadius: 2, marginRight: 4 }} />Tarea</span>
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", borderBottom: "1px solid var(--line)", background: "#faf6ef" }}>
         {DAYS_ES.map((d) => <div key={d} style={{ padding: "10px 0", textAlign: "center", fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)", letterSpacing: "0.1em", fontWeight: 600 }}>{d}</div>)}
@@ -243,6 +306,8 @@ export function MonthCalendar({ year, month, events, onPrev, onNext, onToday, co
           const dow = idx % 7;
           const isWeekend = dow === 5 || dow === 6;
           const evs = d ? (eventsByDay[d] || []) : [];
+          const tks = d ? (tasksByDay[d] || []) : [];
+          const dateStr = d ? `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}` : null;
           return (
             <div key={idx} style={{
               borderRight: ((idx + 1) % 7) ? "1px solid var(--line)" : "none",
@@ -252,9 +317,15 @@ export function MonthCalendar({ year, month, events, onPrev, onNext, onToday, co
             }}>
               {d && (
                 <>
-                  <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, fontWeight: isToday ? 700 : 500, color: isToday ? "#fff" : (isWeekend ? "var(--ink-mute)" : "var(--ink-soft)"), background: isToday ? "var(--accent)" : "transparent", borderRadius: 999, width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 4 }}>{d}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                    <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, fontWeight: isToday ? 700 : 500, color: isToday ? "#fff" : (isWeekend ? "var(--ink-mute)" : "var(--ink-soft)"), background: isToday ? "var(--accent)" : "transparent", borderRadius: 999, width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{d}</div>
+                    {onCreateTask && !compact && (
+                      <button onClick={() => onCreateTask(dateStr)} title="Crear tarea ese día" data-testid={`day-add-task-${dateStr}`}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-mute)", fontSize: 14, padding: 0, lineHeight: 1, opacity: 0.5 }}>＋</button>
+                    )}
+                  </div>
                   <div style={{ display: "grid", gap: 2 }}>
-                    {evs.slice(0, compact ? 2 : 4).map((e) => (
+                    {evs.slice(0, compact ? 2 : 3).map((e) => (
                       <button key={e.id} onClick={() => navigate(`/eventos/${e.id}`)} title={`${e.name} · ${e.type}`} style={{
                         background: e.type === "bolo" ? "#fef3c7" : "#dbeafe",
                         color: e.type === "bolo" ? "#92400e" : "#1e3a8a",
@@ -265,7 +336,24 @@ export function MonthCalendar({ year, month, events, onPrev, onNext, onToday, co
                         opacity: e.status === "cerrado" ? 0.6 : 1,
                       }}>{e.name}</button>
                     ))}
-                    {evs.length > (compact ? 2 : 4) && <div style={{ fontSize: 10, color: "var(--ink-mute)", paddingLeft: 6 }}>+ {evs.length - (compact ? 2 : 4)} más</div>}
+                    {tks.slice(0, compact ? 1 : 3).map((t) => {
+                      const techNames = (t.assigned_technicians || []).map((tid) => {
+                        const u = (technicians || []).find((x) => x.id === tid);
+                        return u ? (u.name || u.email) : "";
+                      }).filter(Boolean).join(", ");
+                      const startH = t.start_dt ? new Date(t.start_dt).toTimeString().slice(0, 5) : "";
+                      return (
+                        <button key={t.id} onClick={() => onEditTask ? onEditTask(t) : null} title={`${t.title}${techNames ? " · " + techNames : ""}`} data-testid={`task-chip-${t.id}`}
+                          style={{
+                            background: "#ede9fe", color: "#5b21b6",
+                            border: "1px solid #c4b5fd",
+                            borderRadius: 4, padding: "1px 6px", fontSize: 11, fontWeight: 500,
+                            textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            cursor: onEditTask ? "pointer" : "default", width: "100%",
+                          }}>{kindLabel(t.kind)} {startH && <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 10 }}>{startH}</span>} {t.title}</button>
+                      );
+                    })}
+                    {(evs.length + tks.length) > (compact ? 3 : 6) && <div style={{ fontSize: 10, color: "var(--ink-mute)", paddingLeft: 6 }}>+ {(evs.length + tks.length) - (compact ? 3 : 6)} más</div>}
                   </div>
                 </>
               )}

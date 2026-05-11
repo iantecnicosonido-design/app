@@ -59,6 +59,8 @@ export default function EventDetail() {
   const [technicians, setTechnicians] = useState([]);
   const [techOpen, setTechOpen] = useState(false);
   const [techSel, setTechSel] = useState([]);
+  const [techNotes, setTechNotes] = useState({}); // {tid: note}
+  const [techResponsible, setTechResponsible] = useState(null);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -247,13 +249,21 @@ export default function EventDetail() {
   };
 
   const toggleTech = (tid) => {
-    if (techSel.includes(tid)) setTechSel(techSel.filter((x) => x !== tid));
-    else setTechSel([...techSel, tid]);
+    if (techSel.includes(tid)) {
+      setTechSel(techSel.filter((x) => x !== tid));
+      if (techResponsible === tid) setTechResponsible(null);
+    } else {
+      setTechSel([...techSel, tid]);
+    }
   };
 
   const saveTechs = async () => {
     try {
-      const r = await api.put(`/events/${id}`, { ...ev, assigned_technicians: techSel });
+      const r = await api.post(`/events/${id}/technicians`, {
+        assigned_technicians: techSel,
+        responsible_technician_id: techResponsible,
+        tech_notes: techNotes,
+      });
       setEv(r.data);
       setTechOpen(false);
       toast.success("Técnicos actualizados");
@@ -502,7 +512,7 @@ export default function EventDetail() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}><UsersIcon size={18} /> Técnicos asignados</h3>
           {canEditFicha && !isClosed && (
-            <Button size="sm" onClick={() => { setTechSel(ev.assigned_technicians || []); setTechOpen(true); }} style={{ background: "var(--accent)" }} data-testid="assign-tech-btn"><UserPlus size={14} /> Asignar</Button>
+            <Button size="sm" onClick={() => { setTechSel(ev.assigned_technicians || []); setTechNotes(ev.tech_notes || {}); setTechResponsible(ev.responsible_technician_id || null); setTechOpen(true); }} style={{ background: "var(--accent)" }} data-testid="assign-tech-btn"><UserPlus size={14} /> Asignar</Button>
           )}
         </div>
         {(ev.assigned_technicians || []).length === 0 ? (
@@ -511,12 +521,22 @@ export default function EventDetail() {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {(ev.assigned_technicians || []).map((tid) => {
               const t = technicians.find((x) => x.id === tid);
+              const isResp = ev.responsible_technician_id === tid;
               return (
-                <span key={tid} style={{ padding: "6px 12px", borderRadius: 999, background: "#dcfce7", color: "#166534", fontSize: 13, fontWeight: 500 }}>
+                <span key={tid} style={{ padding: "6px 12px", borderRadius: 999, background: isResp ? "#fef3c7" : "#dcfce7", color: isResp ? "#92400e" : "#166534", fontSize: 13, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 6 }} title={isResp ? "Responsable del evento" : ""}>
+                  {isResp && <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", letterSpacing: "0.06em" }}>★</span>}
                   {t ? (t.name || t.email) : tid}
+                  {t?.phone && <span style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace" }}>· {t.phone}</span>}
                 </span>
               );
             })}
+          </div>
+        )}
+        {/* Private note shown only to the logged-in technician (if exists) */}
+        {user?.role === "tecnico" && (ev.tech_notes || {})[user.id] && (
+          <div style={{ marginTop: 12, padding: 12, borderLeft: "3px solid var(--accent)", background: "#fffbeb", borderRadius: 6 }} data-testid="my-tech-note">
+            <div style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.1em", color: "#92400e", marginBottom: 4 }}>Nota privada del productor</div>
+            <div style={{ fontSize: 13, color: "#78350f", whiteSpace: "pre-wrap" }}>{ev.tech_notes[user.id]}</div>
           </div>
         )}
       </div>
@@ -559,6 +579,11 @@ export default function EventDetail() {
           </div>
         ))}
       </div>
+
+      {/* Expenses (bolo only) */}
+      {ev.type === "bolo" && (user?.role === "productor" || (user?.role === "tecnico" && ev.responsible_technician_id === user.id)) && (
+        <ExpensesSection eventId={id} canEdit={!isClosed} userRole={user.role} userId={user.id} />
+      )}
 
       {/* Block material with search */}
       <Dialog open={matOpen} onOpenChange={(o) => { setMatOpen(o); if (!o) { setPickedMat(null); setSearchQ(""); } }}>
@@ -697,26 +722,60 @@ export default function EventDetail() {
 
       {/* Assign technicians */}
       <Dialog open={techOpen} onOpenChange={setTechOpen}>
-        <DialogContent style={{ maxWidth: 560 }} data-testid="assign-tech-dialog">
+        <DialogContent style={{ maxWidth: 680 }} data-testid="assign-tech-dialog">
           <DialogHeader><DialogTitle>Asignar técnicos al evento</DialogTitle></DialogHeader>
-          <div style={{ display: "grid", gap: 6, maxHeight: 420, overflowY: "auto", padding: 4 }}>
+          <p style={{ fontSize: 12, color: "var(--ink-mute)", marginBottom: 6 }}>
+            Selecciona técnicos, marca uno como <b>responsable</b> y escribe una nota privada para cada uno (se enviará en el email de asignación).
+          </p>
+          <div style={{ display: "grid", gap: 8, maxHeight: 480, overflowY: "auto", padding: 4 }}>
             {technicians.length === 0 ? (
               <p style={{ color: "var(--ink-mute)", fontSize: 13 }}>No hay técnicos. Crea usuarios en <b>Usuarios</b>.</p>
             ) : technicians.map((t) => {
               const checked = techSel.includes(t.id);
+              const isResp = techResponsible === t.id;
               return (
-                <label key={t.id} style={{ display: "grid", gridTemplateColumns: "24px 1fr 100px", gap: 8, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--line)", background: checked ? "#fffbeb" : "#fff", cursor: "pointer", alignItems: "center" }}>
-                  <input type="checkbox" checked={checked} onChange={() => toggleTech(t.id)} data-testid={`tech-${t.email}`} />
-                  <div>
-                    <div style={{ fontWeight: 500 }}>{t.name || t.email}</div>
-                    <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>{t.email}</div>
+                <div key={t.id} style={{ padding: 10, borderRadius: 8, border: `1px solid ${isResp ? "var(--accent)" : "var(--line)"}`, background: checked ? (isResp ? "#fff7ed" : "#fffbeb") : "#fff" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "24px 1fr 110px 110px", gap: 8, alignItems: "center" }}>
+                    <input type="checkbox" checked={checked} onChange={() => toggleTech(t.id)} data-testid={`tech-${t.email}`} />
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: 14 }}>{t.name || t.email}</div>
+                      <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>
+                        {t.email}{t.phone ? ` · ${t.phone}` : ""}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", background: t.role === "productor" ? "#fef3c7" : "#dcfce7", color: t.role === "productor" ? "#92400e" : "#166534", textAlign: "center" }}>{t.role}</span>
+                    <label style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 6, color: checked ? "var(--ink)" : "var(--ink-mute)", cursor: checked ? "pointer" : "not-allowed" }} title="Marcar como responsable del evento">
+                      <input
+                        type="radio"
+                        name="tech-responsible"
+                        checked={isResp}
+                        disabled={!checked}
+                        onChange={() => setTechResponsible(t.id)}
+                        data-testid={`tech-resp-${t.email}`}
+                      />
+                      Responsable
+                    </label>
                   </div>
-                  <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", background: t.role === "productor" ? "#fef3c7" : "#dcfce7", color: t.role === "productor" ? "#92400e" : "#166534", textAlign: "center" }}>{t.role}</span>
-                </label>
+                  {checked && (
+                    <Textarea
+                      placeholder="Nota privada para este técnico (opcional). Se incluye en el email de asignación."
+                      value={techNotes[t.id] || ""}
+                      onChange={(e) => setTechNotes({ ...techNotes, [t.id]: e.target.value })}
+                      data-testid={`tech-note-${t.email}`}
+                      style={{ marginTop: 8, minHeight: 60, fontSize: 13 }}
+                    />
+                  )}
+                </div>
               );
             })}
           </div>
+          {techResponsible && !techSel.includes(techResponsible) && (
+            <p style={{ fontSize: 12, color: "var(--bad)" }}>El responsable debe estar entre los asignados.</p>
+          )}
           <DialogFooter>
+            {techResponsible && (
+              <Button variant="ghost" size="sm" onClick={() => setTechResponsible(null)}>Quitar responsable</Button>
+            )}
             <Button variant="outline" onClick={() => setTechOpen(false)}>Cancelar</Button>
             <Button onClick={saveTechs} style={{ background: "var(--accent)" }} data-testid="save-tech-btn">Guardar</Button>
           </DialogFooter>
@@ -884,3 +943,174 @@ function Lbl({ label, children }) {
     </div>
   );
 }
+
+// =================== ExpensesSection ===================
+function ExpensesSection({ eventId, canEdit, userRole, userId }) {
+  const [items, setItems] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ description: "", amount: "", files: [] });
+  const [uploading, setUploading] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    try {
+      const r = await api.get(`/events/${eventId}/expenses`);
+      setItems(r.data || []);
+    } catch { /* ignore */ } finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [eventId]);
+
+  const total = items.reduce((acc, x) => acc + Number(x.amount || 0), 0);
+
+  const onPickFiles = async (filesList) => {
+    if (!filesList || filesList.length === 0) return;
+    setUploading(true);
+    const added = [];
+    try {
+      for (const f of filesList) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        added.push({ file_id: r.data.id, name: r.data.name, content_type: r.data.content_type });
+      }
+      setForm((s) => ({ ...s, files: [...(s.files || []), ...added] }));
+    } catch (e) { toast.error("Error subiendo archivo"); }
+    finally { setUploading(false); }
+  };
+
+  const submit = async () => {
+    if (!form.description.trim()) { toast.error("Descripción obligatoria"); return; }
+    const amt = parseFloat(form.amount);
+    if (isNaN(amt) || amt < 0) { toast.error("Importe inválido"); return; }
+    try {
+      await api.post(`/events/${eventId}/expenses`, {
+        description: form.description.trim(),
+        amount: amt,
+        currency: "EUR",
+        files: form.files || [],
+      });
+      toast.success("Gasto añadido");
+      setOpen(false);
+      setForm({ description: "", amount: "", files: [] });
+      load();
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const removeOne = async (xid) => {
+    if (!window.confirm("¿Eliminar este gasto?")) return;
+    try { await api.delete(`/events/${eventId}/expenses/${xid}`); load(); }
+    catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  return (
+    <div className="card-paper" style={{ marginTop: 18, border: "1px solid var(--accent)" }} data-testid="expenses-section">
+      {/* Fiscal header */}
+      <div style={{ padding: 14, marginBottom: 14, background: "#fafaf9", border: "1px solid var(--line)", borderRadius: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "start" }}>
+          <div style={{ fontSize: 12, lineHeight: 1.55 }}>
+            <div style={{ fontWeight: 700, fontSize: 13 }}>EDISON RENT SL</div>
+            <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11, color: "var(--ink-mute)" }}>B60800301</div>
+            <div>Carrer Lluis Millet, 64</div>
+            <div>08950, Esplugues de Llobregat, Barcelona</div>
+          </div>
+          <div style={{ padding: "8px 14px", background: "#fee2e2", color: "#991b1b", border: "1.5px solid #fca5a5", borderRadius: 6, fontWeight: 700, fontSize: 13, letterSpacing: "0.04em", textAlign: "right" }} data-testid="expenses-fiscal-warning">
+            ⚠ RECUERDE SOLICITAR FACTURA
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Gastos</h3>
+        {canEdit && (
+          <Button onClick={() => setOpen(true)} style={{ background: "var(--accent)" }} size="sm" data-testid="add-expense-btn"><Plus size={14} /> Añadir gasto</Button>
+        )}
+      </div>
+
+      {loading ? (
+        <p style={{ color: "var(--ink-mute)", fontSize: 13 }}>Cargando…</p>
+      ) : items.length === 0 ? (
+        <p style={{ color: "var(--ink-mute)", fontSize: 13 }}>Sin gastos registrados.</p>
+      ) : (
+        <>
+          {items.map((x) => (
+            <div key={x.id} className="row-hover" style={{ display: "grid", gridTemplateColumns: "1fr 110px 160px 60px", gap: 8, padding: "10px 4px", borderBottom: "1px solid var(--line)", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 500, fontSize: 14 }}>{x.description}</div>
+                {(x.files || []).length > 0 && (
+                  <div style={{ marginTop: 4, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {x.files.map((f) => (
+                      <a key={f.file_id} href={`${API}/files/edison/uploads/${f.file_id}.${(f.name.split(".").pop() || "bin")}`}
+                         target="_blank" rel="noreferrer"
+                         style={{ fontSize: 11, padding: "2px 8px", background: "#fef3c7", color: "#92400e", borderRadius: 4, textDecoration: "none", fontFamily: "JetBrains Mono, monospace" }}>
+                        {f.name || "archivo"}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontFamily: "JetBrains Mono, monospace", fontWeight: 700, fontSize: 14 }}>{Number(x.amount).toFixed(2)} {x.currency}</div>
+              <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>
+                {x.created_by_name}<br/>
+                <span style={{ fontFamily: "JetBrains Mono, monospace" }}>{new Date(x.created_at).toLocaleString("es-ES")}</span>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                {canEdit && (userRole === "productor" || x.created_by === userId) && (
+                  <Button size="icon" variant="ghost" onClick={() => removeOne(x.id)}><Trash2 size={14} /></Button>
+                )}
+              </div>
+            </div>
+          ))}
+          <div style={{ display: "flex", justifyContent: "flex-end", padding: "10px 4px", fontWeight: 700, fontSize: 15 }}>
+            Total: {total.toFixed(2)} EUR
+          </div>
+        </>
+      )}
+
+      {/* Add expense modal */}
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setForm({ description: "", amount: "", files: [] }); }}>
+        <DialogContent data-testid="expense-dialog" style={{ maxWidth: 540 }}>
+          <DialogHeader><DialogTitle>Nuevo gasto</DialogTitle></DialogHeader>
+          <div style={{ padding: 10, background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", borderRadius: 6, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+            RECUERDE SOLICITAR FACTURA · EDISON RENT SL · B60800301
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            <Lbl label="Descripción">
+              <Input value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Ej. Gasolina, peaje, comida del equipo…" data-testid="expense-desc" />
+            </Lbl>
+            <Lbl label="Importe (EUR)">
+              <Input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} placeholder="0.00" data-testid="expense-amount" />
+            </Lbl>
+            <Lbl label="Factura / ticket / fotos">
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", border: "1px dashed var(--line)", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
+                  <Plus size={14} /> Subir archivo
+                  <input type="file" multiple style={{ display: "none" }} onChange={(e) => onPickFiles(e.target.files)} data-testid="expense-file-input" />
+                </label>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 12px", border: "1px dashed var(--line)", borderRadius: 6, fontSize: 12, cursor: "pointer" }}>
+                  📷 Hacer foto
+                  <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => onPickFiles(e.target.files)} data-testid="expense-camera-input" />
+                </label>
+                {uploading && <span style={{ fontSize: 11, color: "var(--ink-mute)" }}>Subiendo…</span>}
+              </div>
+              {(form.files || []).length > 0 && (
+                <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {form.files.map((f, i) => (
+                    <span key={f.file_id} style={{ fontSize: 11, padding: "4px 8px", background: "#dcfce7", color: "#166534", borderRadius: 4, fontFamily: "JetBrains Mono, monospace", display: "inline-flex", gap: 6 }}>
+                      {f.name}
+                      <button onClick={() => setForm({ ...form, files: form.files.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", cursor: "pointer", color: "#166534" }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </Lbl>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button onClick={submit} style={{ background: "var(--accent)" }} data-testid="save-expense-btn">Guardar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+

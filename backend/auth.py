@@ -21,6 +21,7 @@ class User(BaseModel):
     email: str
     password_hash: str = ""
     name: str = ""
+    phone: str = ""
     role: str = "tecnico"  # productor | almacen | tecnico
     active: bool = True
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -30,6 +31,7 @@ class UserPublic(BaseModel):
     id: str
     email: str
     name: str
+    phone: str = ""
     role: str
     active: bool
 
@@ -43,11 +45,13 @@ class RegisterRequest(BaseModel):
     email: str
     password: str
     name: str = ""
+    phone: str = ""
     role: str = "tecnico"
 
 
 class UpdateUserRequest(BaseModel):
     name: Optional[str] = None
+    phone: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
 

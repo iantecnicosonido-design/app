@@ -13,7 +13,7 @@ export default function Users() {
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ email: "", password: "", name: "", role: "tecnico" });
+  const [form, setForm] = useState({ email: "", password: "", name: "", phone: "", role: "tecnico" });
   const [pwdFor, setPwdFor] = useState(null);
   const [newPwd, setNewPwd] = useState("");
 
@@ -22,14 +22,14 @@ export default function Users() {
   };
   useEffect(() => { load(); }, []);
 
-  const startCreate = () => { setEditing(null); setForm({ email: "", password: "", name: "", role: "tecnico" }); setOpen(true); };
-  const startEdit = (u) => { setEditing(u); setForm({ email: u.email, password: "", name: u.name, role: u.role }); setOpen(true); };
+  const startCreate = () => { setEditing(null); setForm({ email: "", password: "", name: "", phone: "", role: "tecnico" }); setOpen(true); };
+  const startEdit = (u) => { setEditing(u); setForm({ email: u.email, password: "", name: u.name, phone: u.phone || "", role: u.role }); setOpen(true); };
 
   const submit = async () => {
     if (!form.email.trim()) { toast.error("Email obligatorio"); return; }
     try {
       if (editing) {
-        await api.put(`/users/${editing.id}`, { name: form.name, role: form.role });
+        await api.put(`/users/${editing.id}`, { name: form.name, phone: form.phone, role: form.role });
       } else {
         if (form.password.length < 8) { toast.error("Contraseña mínimo 8 caracteres"); return; }
         await api.post("/users", form);
@@ -82,7 +82,7 @@ export default function Users() {
                 {u.name || u.email}
                 {u.id === me?.id && <span style={{ fontSize: 9, padding: "2px 6px", background: "#fef3c7", color: "#92400e", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase" }}>TÚ</span>}
               </div>
-              <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{u.email}</div>
+              <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{u.email}{u.phone ? ` · ${u.phone}` : ""}</div>
             </div>
             <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 999, fontWeight: 600, background: roleBg(u.role), color: roleColor(u.role), textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>{ROLE_LABEL[u.role] || u.role}</span>
             <button onClick={() => toggleActive(u)} disabled={u.id === me?.id} style={{ background: "none", border: "none", cursor: u.id === me?.id ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em", color: u.active ? "var(--good)" : "var(--bad)", textAlign: "center", padding: "4px 8px" }}>
@@ -105,6 +105,7 @@ export default function Users() {
           <div style={{ display: "grid", gap: 12 }}>
             <Lbl label="Email"><Input type="email" disabled={!!editing} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="user-email" /></Lbl>
             <Lbl label="Nombre"><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="user-name" /></Lbl>
+            <Lbl label="Teléfono (opcional)"><Input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} data-testid="user-phone" placeholder="+34 600 000 000" /></Lbl>
             <Lbl label="Rol">
               <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
                 <SelectTrigger data-testid="user-role"><SelectValue /></SelectTrigger>
