@@ -1,28 +1,22 @@
 # Stock Eventos - PRD
 
 ## Original Problem Statement
-App en español para controlar el stock de material de empresa de eventos. Categorías: audio, video, luces, estructuras (precargadas desde PDFs Edison Bryan). Calendario de eventos, bloqueo de material por evento, exportación a PDF al cerrar, ficha del evento (alquiler simple o bolo, fecha montaje, fecha acto, horarios, ubicación, nº referencia bolo, nombre cliente), opción de añadir material de alquiler externo discriminando empresa proveedora.
+App en español para controlar el stock de material de empresa de eventos (Edison Bryan). Categorías: audio, video, luces, estructuras, cables. Calendario de eventos, bloqueo de material por evento, exportación a PDF al cerrar, ficha del evento (alquiler simple o bolo, fechas, horarios, ubicación, cliente, ref), opción de añadir material de alquiler externo, vehículos propios + alquilados, gestión de flightcases (cableado), incidencias con archivos, y autenticación con 3 roles.
 
-## User Choices
-- Sin login (acceso libre, app interna)
-- Inventario precargado desde PDFs (262 referencias originales, hoy 308)
-- PDF generado en servidor (reportlab)
-- Bloqueo resta del stock disponible
-- Lista de empresas proveedoras gestionable
-- Categorías dinámicas (añadibles desde UI) con flags `has_unit_refs` y `has_subitems`
-- Categoría "Cables" sin numeración por unidad ni subítems
-- Flightcases reutilizables para distribuir cableado por contenedor
+## Roles & Permisos
+| Rol | Inventario/Packs/Flightcases/Vehículos/Proveedores | Eventos (ficha) | Eventos (material) | Cerrar evento | Exportar PDF | Incidencias | Usuarios |
+|---|---|---|---|---|---|---|---|
+| **Productor** | ✅ Todo | ✅ Crea/edita/borra | ✅ | ✅ | ✅ | ✅ Todo | ✅ Crea/edita |
+| **Almacén** | ✅ Todo | ❌ Solo ver | ✅ Modifica | ✅ | ✅ | ✅ Todo | ❌ |
+| **Técnico** | ❌ | 👁 Solo asignados | ❌ | ❌ | ✅ Solo PDF | ✅ Solo crear | ❌ |
 
 ## Architecture
-- Backend: FastAPI + Motor (MongoDB async) + reportlab para PDF. Todos los endpoints bajo `/api`.
-- Frontend: React 19 + Tailwind + shadcn/ui + sonner + react-router-dom. Tipografía Outfit + JetBrains Mono. Tema cream/zinc con acento ámbar.
+- Backend: FastAPI + Motor (MongoDB async) + reportlab + bcrypt + PyJWT.
+- Frontend: React 19 + Tailwind + shadcn/ui + sonner + react-router-dom.
+- Auth: JWT en httpOnly cookie + Bearer header fallback (localStorage). Productor admin sembrado al iniciar.
 - Datos clave:
-  - `categories`: {id, key, label, prefix, has_subitems, has_unit_refs, order}
-  - `materials`: {id, category, reference, name, quantity, blocked}
-  - `units`: {id, material_id, reference, status, subitems[], notes}
-  - `events`: {id, name, type, ..., materials[{material_id, units[{unit_id, reference, subitems[], flightcase}]}], rentals[]}
-  - `flightcases`: {id, name, description, notes}
-  - `packs`, `incidents`, `providers`
+  - `users`: {id, email, password_hash, name, role, active}
+  - `categories`, `materials`, `units`, `events` (+ assigned_technicians[]), `flightcases`, `vehicles`, `packs`, `incidents`, `incident_logs`, `password_reset_tokens`, `providers`.
 
 ## Implementation
 - ✅ Inventario seed (308 ítems / 1491 unidades)
@@ -30,29 +24,29 @@ App en español para controlar el stock de material de empresa de eventos. Categ
 - ✅ Eventos bolo/alquiler con ventana precisa
 - ✅ Bloqueo unit-level + edición fina de unidades por material
 - ✅ Categoría dinámica "Cables" (sin unit refs ni subitems)
-- ✅ Flightcases CRUD + distribución de cableado (PUT /events/{id}/cable-distribution)
-- ✅ PDF con logo y agrupación de cables por flightcase
-- ✅ Timeline mensual + Dashboard
-
-## Fixes recientes (06-07 May 2026)
-- Bug crash al abrir eventos (categoría dinámica) → corregido en EventDetail/Inventory/Packs
-- Cables sin desglose por unidad en eventos
-- Edición de material bloqueado (Pencil → diálogo con checkboxes / cantidad)
-- Distribución de cables por flightcase + PDF agrupa por flightcase
+- ✅ Flightcases CRUD + distribución de cableado, PDF agrupa por flightcase
+- ✅ Vehículos CRUD + asignación a eventos (propio/alquiler) + incidencias de vehículos
+- ✅ Historial de incidencias con filtros (material/unidad/vehículo/tipo), URLs compartibles
+- ✅ Badge de incidencias por material en inventario, por vehículo en vehículos
+- ✅ Autenticación JWT + bcrypt + 3 roles (Productor/Almacén/Técnico)
+- ✅ Gestión de usuarios desde UI (productor)
+- ✅ Asignación de técnicos a eventos; técnicos solo ven sus eventos
+- ✅ Reset password vía token (Resend email pendiente — token se loggea por ahora)
+- ✅ Tests automatizados pasados (24/24 backend, 7/7 frontend)
 
 ## Backlog
 ### P1
-- Incidencias: textarea descripción larga + adjuntos (fotos/PDFs)
-- Logo personalizable en PDF
+- Integrar Resend para envío real de email (reset password + notificaciones técnicos/clientes)
 
 ### P2
-- Importar/exportar inventario en CSV
-- Histórico de movimientos por unidad
-- Notificaciones email/WhatsApp al cerrar evento
+- Logo personalizable en PDF
+- Importar/exportar inventario CSV
+- Histórico de movimientos por unidad (eventos, no solo incidencias)
+- DialogDescription/aria-describedby para silenciar warnings de a11y
+- Reducir ACCESS_MINUTES y usar refresh-token rotation
 
 ## Key Files
-- `/app/backend/server.py`
-- `/app/backend/seed_inventory.json`
-- `/app/frontend/src/App.js` · rutas
-- `/app/frontend/src/pages/{Dashboard,Inventory,Events,EventDetail,Providers,Packs,Incidents,Timeline,Flightcases}.jsx`
+- `/app/backend/server.py`, `/app/backend/auth.py`, `/app/backend/seed_inventory.json`
+- `/app/frontend/src/App.js`, `/app/frontend/src/lib/{api,auth}.js`
+- `/app/frontend/src/pages/{Dashboard,Inventory,Events,EventDetail,Providers,Packs,Incidents,Timeline,Flightcases,Vehicles,Users,Login,ResetPassword}.jsx`
 - `/app/frontend/src/components/{Layout,SearchSelect}.jsx`
