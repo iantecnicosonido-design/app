@@ -871,7 +871,7 @@ async def update_event(eid: str, payload: EventUpdate, _u: dict = Depends(requir
                     body_html=body,
                     cta_label="Ver detalles",
                     cta_url=ev_url,
-                    footer="Stock Eventos · Edison Bryan",
+                    footer="Edison Rent",
                 )
                 await send_email(tech["email"], f"Asignación: {res.get('name','evento')}", html)
     except Exception as e:
@@ -1763,7 +1763,7 @@ async def stats(user: dict = Depends(get_current_user)):
 
 @api_router.get("/")
 async def root():
-    return {"app": "Stock Eventos", "ok": True}
+    return {"app": "Edison Rent", "ok": True}
 
 
 # ============================================================
@@ -1879,9 +1879,9 @@ async def forgot_password(payload: ForgotPasswordRequest):
                            "elegir una nueva. El enlace caduca en 1 hora."),
                 cta_label="Restablecer contraseña",
                 cta_url=reset_url,
-                footer="Si no has solicitado este cambio, ignora este mensaje. Stock Eventos · Edison Bryan",
+                footer="Si no has solicitado este cambio, ignora este mensaje. Edison Rent",
             )
-            await send_email(email, "Restablecer contraseña · Stock Eventos", html)
+            await send_email(email, "Restablecer contraseña · Edison Rent", html)
         except Exception as e:
             logger.error("forgot_password email error: %s", e)
     return {"ok": True}
@@ -1939,17 +1939,17 @@ async def create_user(payload: RegisterRequest, user: dict = Depends(require_rol
     try:
         public_url = os.environ.get("APP_PUBLIC_URL", "")
         html = render_basic(
-            title="Bienvenido a Stock Eventos",
+            title="Bienvenido a Edison Rent",
             body_html=(f"Hola {u.name or u.email}, se te ha creado una cuenta como "
-                       f"<b>{u.role}</b> en Stock Eventos.<br><br>"
+                       f"<b>{u.role}</b> en Edison Rent.<br><br>"
                        f"<b>Email:</b> {u.email}<br>"
                        f"<b>Contraseña temporal:</b> <code>{payload.password}</code><br><br>"
                        "Cámbiala desde tu perfil después del primer acceso."),
             cta_label="Acceder",
             cta_url=f"{public_url}/login",
-            footer="Stock Eventos · Edison Bryan",
+            footer="Edison Rent",
         )
-        await send_email(u.email, "Tu acceso a Stock Eventos", html)
+        await send_email(u.email, "Tu acceso a Edison Rent", html)
     except Exception as e:
         logger.error("welcome email error: %s", e)
     return _public_user(u.model_dump())

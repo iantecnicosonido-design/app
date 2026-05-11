@@ -1,1 +1,523 @@
-[{"name":"Festa jove esports","location":"Aj Cornellá","type":"alquiler","setup_date":"2026-04-24","event_date":"2026-04-24","schedule":"12:00 - 22:00"},{"name":"Jordiada","location":"Sala padró","type":"alquiler","setup_date":"2026-04-24","event_date":"2026-04-24","schedule":"15:30 - 23:00"},{"name":"Cornellà Escena","location":"Sala romagosa","type":"alquiler","setup_date":"2026-04-25","event_date":"2026-04-25","schedule":"14:00 - 21:00"},{"name":"Concurso","location":"Sala Padró","type":"alquiler","setup_date":"2026-04-26","event_date":"2026-04-26","schedule":"10:00 - 12:30"},{"name":"Corresolidaris","location":"Cornellá","type":"alquiler","setup_date":"2026-04-26","event_date":"2026-04-26","schedule":"7:00 - 15:00"},{"name":"Las academias bailan","location":"Cornellá","type":"alquiler","setup_date":"2026-05-09","event_date":"2026-05-09"},{"name":"La Gran Band","type":"alquiler","setup_date":"2026-05-09","event_date":"2026-05-09"},{"name":"Bolo Orfe","location":"Cornellá","type":"bolo","setup_date":"2026-05-09","event_date":"2026-05-09","schedule":"8:00 - 15:00"},{"name":"Concurso amateur","location":"Cornellá","type":"alquiler","setup_date":"2026-05-10","event_date":"2026-05-10","notes":"no va nadie"},{"name":"Fundesplai","type":"alquiler","setup_date":"2026-05-10","event_date":"2026-05-10","schedule":"5:00 - 22:00"},{"name":"Bachata montaje","type":"alquiler","setup_date":"2026-05-12","event_date":"2026-05-12","schedule":"10:00 - 15:00"},{"name":"Nit dels museus","type":"alquiler","setup_date":"2026-05-16","event_date":"2026-05-16","schedule":"15:00 - 23:00"},{"name":"Castellvell i el Vilar","type":"alquiler","setup_date":"2026-05-16","event_date":"2026-05-16","schedule":"6:00 - 22:00"},{"name":"Castellvell i el Vilar","type":"alquiler","setup_date":"2026-05-17","event_date":"2026-05-17","schedule":"6:00 - 22:00"},{"name":"Festa Major linyola dj","type":"alquiler","setup_date":"2026-05-22","event_date":"2026-05-22","schedule":"12:00 - 6:00"},{"name":"Bolo sant boi sazonando","type":"bolo","setup_date":"2026-05-22","event_date":"2026-05-22"},{"name":"Festa Major linyola grupo de versiones","type":"alquiler","setup_date":"2026-05-23","event_date":"2026-05-23","schedule":"12:00 - 6:00"},{"name":"Cloenda cornellà escena","type":"alquiler","setup_date":"2026-05-23","event_date":"2026-05-23","schedule":"12:00 - 1:00"},{"name":"Festa Major linyola espectaculo Hi Fi","type":"alquiler","setup_date":"2026-05-24","event_date":"2026-05-24","schedule":"12:00 - 6:00"},{"name":"Cornella escena","type":"alquiler","setup_date":"2026-05-24","event_date":"2026-05-24"},{"name":"Desmontaje Linyola","type":"alquiler","setup_date":"2026-05-25","event_date":"2026-05-25"},{"name":"Cloenda de l'Esport","type":"alquiler","setup_date":"2026-05-30","event_date":"2026-05-30"},{"name":"Reserva Mala vida Bcn","type":"alquiler","setup_date":"2026-06-06","event_date":"2026-06-06","schedule":"9:00 - 23:00"},{"name":"Gran Band reserva","type":"alquiler","setup_date":"2026-06-06","event_date":"2026-06-06"},{"name":"Gran Band reserva","type":"alquiler","setup_date":"2026-06-07","event_date":"2026-06-07"},{"name":"Mireia baile Marta roig","type":"alquiler","setup_date":"2026-06-11","event_date":"2026-06-11","schedule":"12:00 - 6:00"},{"name":"Mireia baile Marta roig","type":"alquiler","setup_date":"2026-06-12","event_date":"2026-06-12","schedule":"12:00 - 6:00"},{"name":"Mireia baile Marta roig","type":"alquiler","setup_date":"2026-06-13","event_date":"2026-06-13","schedule":"12:00 - 6:00"},{"name":"Rojinegro","type":"alquiler","setup_date":"2026-06-13","event_date":"2026-06-13","schedule":"9:00 - 22:00"},{"name":"Gran Band","type":"alquiler","setup_date":"2026-06-13","event_date":"2026-06-13","schedule":"9:00 - 22:00"},{"name":"Jaume Balmes fin de curso","type":"alquiler","setup_date":"2026-06-19","event_date":"2026-06-19","schedule":"12:00 - 3:00"},{"name":"Sabadell escuela / Pool Party","type":"alquiler","setup_date":"2026-06-20","event_date":"2026-06-20","schedule":"14:00 - 20:00"},{"name":"Sabadell escuela","type":"alquiler","setup_date":"2026-06-22","event_date":"2026-06-22","schedule":"10:00 - 22:00"},{"name":"Revetlla orfe","type":"alquiler","setup_date":"2026-06-23","event_date":"2026-06-23","schedule":"15:00 - 2:00"},{"name":"Sabor","type":"alquiler","setup_date":"2026-06-23","event_date":"2026-06-23","schedule":"15:00 - 2:00"},{"name":"Sant Joan vilatorrada","type":"alquiler","setup_date":"2026-06-27","event_date":"2026-06-27","schedule":"12:00 - 6:00"},{"name":"Castellers el Prat","type":"alquiler","setup_date":"2026-06-27","event_date":"2026-06-27","schedule":"15:00 - 3:00"},{"name":"Reserva DBA Gran Band","type":"bolo","setup_date":"2026-07-03","event_date":"2026-07-03","schedule":"12:00 - 6:00"},{"name":"Reserva DBA Gran Band","type":"bolo","setup_date":"2026-07-04","event_date":"2026-07-04","schedule":"12:00 - 6:00"},{"name":"Reserva DBA Gran Band","type":"bolo","setup_date":"2026-07-05","event_date":"2026-07-05","schedule":"12:00 - 6:00"},{"name":"DBA reserva","type":"bolo","setup_date":"2026-07-10","event_date":"2026-07-10","schedule":"12:00 - 6:00"},{"name":"Montaje pantalla","type":"alquiler","setup_date":"2026-07-10","event_date":"2026-07-10"},{"name":"Montaje pantalla","type":"alquiler","setup_date":"2026-07-11","event_date":"2026-07-11"},{"name":"Reserva DBA Gran Band","type":"bolo","setup_date":"2026-07-11","event_date":"2026-07-11","schedule":"12:00 - 6:00"},{"name":"Reserva DBA Gran Band","type":"bolo","setup_date":"2026-07-12","event_date":"2026-07-12","schedule":"12:00 - 6:00"},{"name":"Reserva sabor sabor","type":"bolo","setup_date":"2026-07-17","event_date":"2026-07-17","schedule":"12:00 - 6:00"},{"name":"Reserva DBA sabor","type":"bolo","setup_date":"2026-07-23","event_date":"2026-07-23","schedule":"12:00 - 6:00"},{"name":"Enric Subiros","type":"bolo","setup_date":"2026-07-31","event_date":"2026-07-31","schedule":"12:00 - 6:00"},{"name":"Enric subiros","type":"bolo","setup_date":"2026-08-01","event_date":"2026-08-01","schedule":"12:00 - 6:00"},{"name":"Vimbodi","type":"bolo","setup_date":"2026-08-07","event_date":"2026-08-07","schedule":"12:00 - 6:00"},{"name":"Reserva sabor","type":"bolo","setup_date":"2026-08-07","event_date":"2026-08-07","schedule":"12:00 - 6:00"},{"name":"Reserva sabor","type":"bolo","setup_date":"2026-08-08","event_date":"2026-08-08","schedule":"12:00 - 6:00"},{"name":"Grand Band huesca","type":"bolo","setup_date":"2026-08-13","event_date":"2026-08-13","schedule":"12:00 - 6:00"},{"name":"Linyola","type":"bolo","setup_date":"2026-08-13","event_date":"2026-08-13","schedule":"12:00 - 6:00"},{"name":"sabor sabor","type":"bolo","setup_date":"2026-08-13","event_date":"2026-08-13","schedule":"12:00 - 6:00","notes":"Iker y su equipo +lan"},{"name":"sabor sabor","type":"bolo","setup_date":"2026-08-14","event_date":"2026-08-14","schedule":"12:00 - 6:00","notes":"Iker y su equipo +lan"},{"name":"Grand Band Panticosa","type":"bolo","setup_date":"2026-08-14","event_date":"2026-08-14","schedule":"12:00 - 6:00"},{"name":"Grand Band Mayals","type":"bolo","setup_date":"2026-08-15","event_date":"2026-08-15","schedule":"12:00 - 6:00"},{"name":"Subiros Cubells","type":"bolo","setup_date":"2026-08-21","event_date":"2026-08-21","schedule":"12:00 - 6:00"},{"name":"Subiros Panelles","type":"bolo","setup_date":"2026-08-29","event_date":"2026-08-29","schedule":"12:00 - 6:00"},{"name":"Reserva gran Band","type":"bolo","setup_date":"2026-08-30","event_date":"2026-08-30","schedule":"12:00 - 6:00"},{"name":"Festa Major Setmenat","type":"bolo","setup_date":"2026-09-04","event_date":"2026-09-04","schedule":"9:00 - 3:00"},{"name":"Reserva DBA","type":"bolo","setup_date":"2026-09-04","event_date":"2026-09-04","schedule":"12:00 - 6:00"},{"name":"Festa Major Setmenat","type":"bolo","setup_date":"2026-09-05","event_date":"2026-09-05","schedule":"12:00 - 6:00"},{"name":"Festa Major Setmenat","type":"bolo","setup_date":"2026-09-06","event_date":"2026-09-06","schedule":"12:00 - 6:00"},{"name":"Reserva DBA","type":"bolo","setup_date":"2026-09-08","event_date":"2026-09-08","schedule":"12:00 - 6:00"},{"name":"Reserva DBA Hospitalet","type":"bolo","setup_date":"2026-09-10","event_date":"2026-09-10","schedule":"12:00 - 6:00"},{"name":"Reserva DBA Hospitalet","type":"bolo","setup_date":"2026-09-11","event_date":"2026-09-11","schedule":"12:00 - 6:00"},{"name":"Reserva DBA Hospitalet","type":"bolo","setup_date":"2026-09-12","event_date":"2026-09-12","schedule":"12:00 - 6:00"},{"name":"Festi Metal Orfe","type":"bolo","setup_date":"2026-09-12","event_date":"2026-09-12","schedule":"15:00 - 0:00"},{"name":"Reserva DBA Hospitalet","type":"bolo","setup_date":"2026-09-13","event_date":"2026-09-13","schedule":"12:00 - 6:00"},{"name":"Pantalla LED Rosenc","type":"bolo","setup_date":"2026-09-26","event_date":"2026-09-26"},{"name":"Festa Jove","type":"bolo","setup_date":"2026-10-02","event_date":"2026-10-02"},{"name":"Cornellà Escénica","type":"bolo","setup_date":"2026-10-03","event_date":"2026-10-03"},{"name":"Gran Band (la granadella)","type":"bolo","setup_date":"2026-10-13","event_date":"2026-10-13"}]
+[
+    {
+        "name": "Festa jove esports",
+        "location": "Aj Cornellá",
+        "type": "alquiler",
+        "setup_date": "2026-04-24",
+        "event_date": "2026-04-24",
+        "schedule": "12:00 - 22:00"
+    },
+    {
+        "name": "Jordiada",
+        "location": "Sala padró",
+        "type": "alquiler",
+        "setup_date": "2026-04-24",
+        "event_date": "2026-04-24",
+        "schedule": "15:30 - 23:00"
+    },
+    {
+        "name": "Cornellà Escena",
+        "location": "Sala romagosa",
+        "type": "alquiler",
+        "setup_date": "2026-04-25",
+        "event_date": "2026-04-25",
+        "schedule": "14:00 - 21:00"
+    },
+    {
+        "name": "Concurso",
+        "location": "Sala Padró",
+        "type": "alquiler",
+        "setup_date": "2026-04-26",
+        "event_date": "2026-04-26",
+        "schedule": "10:00 - 12:30"
+    },
+    {
+        "name": "Corresolidaris",
+        "location": "Cornellá",
+        "type": "alquiler",
+        "setup_date": "2026-04-26",
+        "event_date": "2026-04-26",
+        "schedule": "7:00 - 15:00"
+    },
+    {
+        "name": "Las academias bailan",
+        "location": "Cornellá",
+        "type": "alquiler",
+        "setup_date": "2026-05-09",
+        "event_date": "2026-05-09"
+    },
+    {
+        "name": "La Gran Band",
+        "type": "alquiler",
+        "setup_date": "2026-05-09",
+        "event_date": "2026-05-09"
+    },
+    {
+        "name": "Bolo Orfe",
+        "location": "Cornellá",
+        "type": "bolo",
+        "setup_date": "2026-05-09",
+        "event_date": "2026-05-09",
+        "schedule": "8:00 - 15:00"
+    },
+    {
+        "name": "Concurso amateur",
+        "location": "Cornellá",
+        "type": "alquiler",
+        "setup_date": "2026-05-10",
+        "event_date": "2026-05-10",
+        "notes": "no va nadie"
+    },
+    {
+        "name": "Fundesplai",
+        "type": "alquiler",
+        "setup_date": "2026-05-10",
+        "event_date": "2026-05-10",
+        "schedule": "5:00 - 22:00"
+    },
+    {
+        "name": "Bachata montaje",
+        "type": "alquiler",
+        "setup_date": "2026-05-12",
+        "event_date": "2026-05-12",
+        "schedule": "10:00 - 15:00"
+    },
+    {
+        "name": "Nit dels museus",
+        "type": "alquiler",
+        "setup_date": "2026-05-16",
+        "event_date": "2026-05-16",
+        "schedule": "15:00 - 23:00"
+    },
+    {
+        "name": "Castellvell i el Vilar",
+        "type": "alquiler",
+        "setup_date": "2026-05-16",
+        "event_date": "2026-05-16",
+        "schedule": "6:00 - 22:00"
+    },
+    {
+        "name": "Castellvell i el Vilar",
+        "type": "alquiler",
+        "setup_date": "2026-05-17",
+        "event_date": "2026-05-17",
+        "schedule": "6:00 - 22:00"
+    },
+    {
+        "name": "Festa Major linyola dj",
+        "type": "alquiler",
+        "setup_date": "2026-05-22",
+        "event_date": "2026-05-22",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Bolo sant boi sazonando",
+        "type": "bolo",
+        "setup_date": "2026-05-22",
+        "event_date": "2026-05-22"
+    },
+    {
+        "name": "Festa Major linyola grupo de versiones",
+        "type": "alquiler",
+        "setup_date": "2026-05-23",
+        "event_date": "2026-05-23",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Cloenda cornellà escena",
+        "type": "alquiler",
+        "setup_date": "2026-05-23",
+        "event_date": "2026-05-23",
+        "schedule": "12:00 - 1:00"
+    },
+    {
+        "name": "Festa Major linyola espectaculo Hi Fi",
+        "type": "alquiler",
+        "setup_date": "2026-05-24",
+        "event_date": "2026-05-24",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Cornella escena",
+        "type": "alquiler",
+        "setup_date": "2026-05-24",
+        "event_date": "2026-05-24"
+    },
+    {
+        "name": "Desmontaje Linyola",
+        "type": "alquiler",
+        "setup_date": "2026-05-25",
+        "event_date": "2026-05-25"
+    },
+    {
+        "name": "Cloenda de l'Esport",
+        "type": "alquiler",
+        "setup_date": "2026-05-30",
+        "event_date": "2026-05-30"
+    },
+    {
+        "name": "Reserva Mala vida Bcn",
+        "type": "alquiler",
+        "setup_date": "2026-06-06",
+        "event_date": "2026-06-06",
+        "schedule": "9:00 - 23:00"
+    },
+    {
+        "name": "Gran Band reserva",
+        "type": "alquiler",
+        "setup_date": "2026-06-06",
+        "event_date": "2026-06-06"
+    },
+    {
+        "name": "Gran Band reserva",
+        "type": "alquiler",
+        "setup_date": "2026-06-07",
+        "event_date": "2026-06-07"
+    },
+    {
+        "name": "Mireia baile Marta roig",
+        "type": "alquiler",
+        "setup_date": "2026-06-11",
+        "event_date": "2026-06-11",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Mireia baile Marta roig",
+        "type": "alquiler",
+        "setup_date": "2026-06-12",
+        "event_date": "2026-06-12",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Mireia baile Marta roig",
+        "type": "alquiler",
+        "setup_date": "2026-06-13",
+        "event_date": "2026-06-13",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Rojinegro",
+        "type": "alquiler",
+        "setup_date": "2026-06-13",
+        "event_date": "2026-06-13",
+        "schedule": "9:00 - 22:00"
+    },
+    {
+        "name": "Gran Band",
+        "type": "alquiler",
+        "setup_date": "2026-06-13",
+        "event_date": "2026-06-13",
+        "schedule": "9:00 - 22:00"
+    },
+    {
+        "name": "Jaume Balmes fin de curso",
+        "type": "alquiler",
+        "setup_date": "2026-06-19",
+        "event_date": "2026-06-19",
+        "schedule": "12:00 - 3:00"
+    },
+    {
+        "name": "Sabadell escuela / Pool Party",
+        "type": "alquiler",
+        "setup_date": "2026-06-20",
+        "event_date": "2026-06-20",
+        "schedule": "14:00 - 20:00"
+    },
+    {
+        "name": "Sabadell escuela",
+        "type": "alquiler",
+        "setup_date": "2026-06-22",
+        "event_date": "2026-06-22",
+        "schedule": "10:00 - 22:00"
+    },
+    {
+        "name": "Revetlla orfe",
+        "type": "alquiler",
+        "setup_date": "2026-06-23",
+        "event_date": "2026-06-23",
+        "schedule": "15:00 - 2:00"
+    },
+    {
+        "name": "Sabor",
+        "type": "alquiler",
+        "setup_date": "2026-06-23",
+        "event_date": "2026-06-23",
+        "schedule": "15:00 - 2:00"
+    },
+    {
+        "name": "Sant Joan vilatorrada",
+        "type": "alquiler",
+        "setup_date": "2026-06-27",
+        "event_date": "2026-06-27",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Castellers el Prat",
+        "type": "alquiler",
+        "setup_date": "2026-06-27",
+        "event_date": "2026-06-27",
+        "schedule": "15:00 - 3:00"
+    },
+    {
+        "name": "Reserva DBA Gran Band",
+        "type": "bolo",
+        "setup_date": "2026-07-03",
+        "event_date": "2026-07-03",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA Gran Band",
+        "type": "bolo",
+        "setup_date": "2026-07-04",
+        "event_date": "2026-07-04",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA Gran Band",
+        "type": "bolo",
+        "setup_date": "2026-07-05",
+        "event_date": "2026-07-05",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "DBA reserva",
+        "type": "bolo",
+        "setup_date": "2026-07-10",
+        "event_date": "2026-07-10",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Montaje pantalla",
+        "type": "alquiler",
+        "setup_date": "2026-07-10",
+        "event_date": "2026-07-10"
+    },
+    {
+        "name": "Montaje pantalla",
+        "type": "alquiler",
+        "setup_date": "2026-07-11",
+        "event_date": "2026-07-11"
+    },
+    {
+        "name": "Reserva DBA Gran Band",
+        "type": "bolo",
+        "setup_date": "2026-07-11",
+        "event_date": "2026-07-11",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA Gran Band",
+        "type": "bolo",
+        "setup_date": "2026-07-12",
+        "event_date": "2026-07-12",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva sabor sabor",
+        "type": "bolo",
+        "setup_date": "2026-07-17",
+        "event_date": "2026-07-17",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA sabor",
+        "type": "bolo",
+        "setup_date": "2026-07-23",
+        "event_date": "2026-07-23",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Enric Subiros",
+        "type": "bolo",
+        "setup_date": "2026-07-31",
+        "event_date": "2026-07-31",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Enric subiros",
+        "type": "bolo",
+        "setup_date": "2026-08-01",
+        "event_date": "2026-08-01",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Vimbodi",
+        "type": "bolo",
+        "setup_date": "2026-08-07",
+        "event_date": "2026-08-07",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva sabor",
+        "type": "bolo",
+        "setup_date": "2026-08-07",
+        "event_date": "2026-08-07",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva sabor",
+        "type": "bolo",
+        "setup_date": "2026-08-08",
+        "event_date": "2026-08-08",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Grand Band huesca",
+        "type": "bolo",
+        "setup_date": "2026-08-13",
+        "event_date": "2026-08-13",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Linyola",
+        "type": "bolo",
+        "setup_date": "2026-08-13",
+        "event_date": "2026-08-13",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "sabor sabor",
+        "type": "bolo",
+        "setup_date": "2026-08-13",
+        "event_date": "2026-08-13",
+        "schedule": "12:00 - 6:00",
+        "notes": "Iker y su equipo +lan"
+    },
+    {
+        "name": "sabor sabor",
+        "type": "bolo",
+        "setup_date": "2026-08-14",
+        "event_date": "2026-08-14",
+        "schedule": "12:00 - 6:00",
+        "notes": "Iker y su equipo +lan"
+    },
+    {
+        "name": "Grand Band Panticosa",
+        "type": "bolo",
+        "setup_date": "2026-08-14",
+        "event_date": "2026-08-14",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Grand Band Mayals",
+        "type": "bolo",
+        "setup_date": "2026-08-15",
+        "event_date": "2026-08-15",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Subiros Cubells",
+        "type": "bolo",
+        "setup_date": "2026-08-21",
+        "event_date": "2026-08-21",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Subiros Panelles",
+        "type": "bolo",
+        "setup_date": "2026-08-29",
+        "event_date": "2026-08-29",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva gran Band",
+        "type": "bolo",
+        "setup_date": "2026-08-30",
+        "event_date": "2026-08-30",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Festa Major Setmenat",
+        "type": "bolo",
+        "setup_date": "2026-09-04",
+        "event_date": "2026-09-04",
+        "schedule": "9:00 - 3:00"
+    },
+    {
+        "name": "Reserva DBA",
+        "type": "bolo",
+        "setup_date": "2026-09-04",
+        "event_date": "2026-09-04",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Festa Major Setmenat",
+        "type": "bolo",
+        "setup_date": "2026-09-05",
+        "event_date": "2026-09-05",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Festa Major Setmenat",
+        "type": "bolo",
+        "setup_date": "2026-09-06",
+        "event_date": "2026-09-06",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA",
+        "type": "bolo",
+        "setup_date": "2026-09-08",
+        "event_date": "2026-09-08",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA Hospitalet",
+        "type": "bolo",
+        "setup_date": "2026-09-10",
+        "event_date": "2026-09-10",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA Hospitalet",
+        "type": "bolo",
+        "setup_date": "2026-09-11",
+        "event_date": "2026-09-11",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Reserva DBA Hospitalet",
+        "type": "bolo",
+        "setup_date": "2026-09-12",
+        "event_date": "2026-09-12",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Festi Metal Orfe",
+        "type": "bolo",
+        "setup_date": "2026-09-12",
+        "event_date": "2026-09-12",
+        "schedule": "15:00 - 0:00"
+    },
+    {
+        "name": "Reserva DBA Hospitalet",
+        "type": "bolo",
+        "setup_date": "2026-09-13",
+        "event_date": "2026-09-13",
+        "schedule": "12:00 - 6:00"
+    },
+    {
+        "name": "Pantalla LED Rosenc",
+        "type": "bolo",
+        "setup_date": "2026-09-26",
+        "event_date": "2026-09-26"
+    },
+    {
+        "name": "Festa Jove",
+        "type": "bolo",
+        "setup_date": "2026-10-02",
+        "event_date": "2026-10-02"
+    },
+    {
+        "name": "Cornellà Escénica",
+        "type": "bolo",
+        "setup_date": "2026-10-03",
+        "event_date": "2026-10-03"
+    },
+    {
+        "name": "Gran Band (la granadella)",
+        "type": "bolo",
+        "setup_date": "2026-10-13",
+        "event_date": "2026-10-13"
+    }
+]

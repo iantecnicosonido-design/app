@@ -22,7 +22,7 @@ def _from_address() -> str:
 
 
 def _from_name() -> str:
-    return os.environ.get("SENDER_NAME", "Stock Eventos")
+    return os.environ.get("SENDER_NAME", "Edison Rent")
 
 
 async def send_email(
@@ -85,7 +85,7 @@ def render_basic(title: str, body_html: str, cta_label: Optional[str] = None,
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background:#fafaf9;padding:32px 0;font-family:Helvetica,Arial,sans-serif;">
       <tr><td align="center">
         <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="560" style="background:#fff;border-radius:12px;padding:32px;border:1px solid #e7e5e4;">
-          <tr><td style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#a8a29e;font-weight:600;">Stock · Eventos</td></tr>
+          <tr><td style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#a8a29e;font-weight:600;">Edison Rent</td></tr>
           <tr><td style="padding-top:6px;font-size:22px;font-weight:700;color:#111827;">{title}</td></tr>
           <tr><td style="padding-top:18px;font-size:14px;color:#44403c;line-height:1.6;">{body_html}</td></tr>
           {cta}

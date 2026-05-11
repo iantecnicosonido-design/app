@@ -29,8 +29,13 @@ export default function Layout() {
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="sidebar">
-        <h1>Stock · Eventos</h1>
-        <div className="brand-sub">control de material</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 18px", background: "#fafaf9", margin: "-28px -18px 20px -18px", borderBottom: "1px solid var(--sidebar-line)" }}>
+          <img src="/logo.png" alt="Edison Rent" style={{ height: 32, width: "auto", flexShrink: 0 }} />
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#111827", letterSpacing: "-0.01em", whiteSpace: "nowrap", fontFamily: "'Outfit', sans-serif" }}>Edison Rent</h1>
+            <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 9, color: "#78716c", letterSpacing: "0.14em", textTransform: "uppercase", marginTop: 2 }}>control material</div>
+          </div>
+        </div>
         <nav>
           {items.map((it) => (
             <NavLink

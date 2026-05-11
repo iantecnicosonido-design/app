@@ -13,7 +13,7 @@ export default function Login() {
   const [forgot, setForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
 
-  useEffect(() => { document.title = "Login · Stock Eventos"; }, []);
+  useEffect(() => { document.title = "Login · Edison Rent"; }, []);
 
   if (user) return <Navigate to="/" replace />;
 
@@ -45,7 +45,8 @@ export default function Login() {
     <div style={{ minHeight: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} data-testid="login-page">
       <div style={{ width: "100%", maxWidth: 420 }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <h1 style={{ fontSize: 32, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>Stock · Eventos</h1>
+          <img src="/logo.png" alt="Edison Rent" style={{ height: 96, marginBottom: 16, display: "inline-block" }} />
+          <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>Edison Rent</h1>
           <p style={{ fontSize: 12, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.1em", margin: "6px 0 0 0" }}>Control de material</p>
         </div>
         <form onSubmit={forgot ? submitForgot : submit} className="card-paper" style={{ padding: 28 }}>
