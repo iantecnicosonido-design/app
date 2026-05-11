@@ -75,6 +75,14 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - `resolve_incident` hace `$unset` de ambos campos
   - `list_incidents` ordena: urgentes primero, luego por `incident_opened_at` ascendente (más antiguas arriba). Backfill automático para legacy: usa fecha del último report log si no hay `incident_opened_at`
   - UI Incidents.jsx: badge "🔥 URGENTE" rojo + borde izquierdo rojo + fondo rosado en tarjetas urgentes. Columna "hace Xh/Xd" tiempo abierta. Botón ⚠️ (solo productor) para toggle urgencia. Para rol taller, título cambia a "Cola de trabajo · Taller"
+- ✅ **Auto-retirada de material averiado + sistema de notificaciones (Feb 2026)**:
+  - `create_incident` ya NO rechaza unidades/vehículos asignados a eventos abiertos. En su lugar:
+    1. Retira automáticamente la unidad de todos los `events` abiertos donde aparezca en `materials[].units[]`
+    2. Para vehículos, retira de `events.vehicles[]` (solo los `type=owned`)
+    3. Crea una `Notification` por cada evento afectado dirigida a TODOS los productores activos
+  - Nueva colección `notifications` + modelo `Notification` (id, user_id, type, title, message, link, read, created_at)
+  - Endpoints CRUD: `GET /notifications` (con unread count), `GET /notifications/unread-count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `DELETE /notifications/{id}`
+  - Frontend: nuevo componente `NotificationBell` en sidebar (Layout.jsx) con badge rojo de no leídas, dropdown con últimas 30 notifs (poll cada 30s), click marca leída y navega al link del evento. Helpers backend: `_notify(user_id, ...)`, `_notify_productores(...)`, `_remove_unit_from_open_events(...)`, `_remove_vehicle_from_open_events(...)`
 
 ## Backlog
 ### P1

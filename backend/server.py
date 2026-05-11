@@ -461,6 +461,18 @@ class IncidentResolve(BaseModel):
     files: List[Dict[str, Any]] = []
 
 
+# ---------- Notifications ----------
+class Notification(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    type: str = "info"  # incident_removed_from_event | info | ...
+    title: str
+    message: str = ""
+    link: str = ""  # ruta frontend, ej. /eventos/abc
+    read: bool = False
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
 class PackItem(BaseModel):
     material_id: str
     name: str = ""
@@ -1708,6 +1720,69 @@ async def apply_pack(eid: str, pid: str, _u: dict = Depends(require_warehouse)):
     return {"event": ev, "results": results}
 
 
+# ---------- Notifications helpers ----------
+async def _notify(user_id: str, type: str, title: str, message: str = "", link: str = "") -> None:
+    """Insert a single notification for a user. Safe (logs errors, never raises)."""
+    try:
+        n = Notification(user_id=user_id, type=type, title=title, message=message, link=link)
+        await db.notifications.insert_one(n.model_dump())
+    except Exception as e:
+        logger.error("notify failed: %s", e)
+
+
+async def _notify_productores(type: str, title: str, message: str = "", link: str = "") -> int:
+    """Notify all active productor users. Returns count."""
+    n = 0
+    async for u in db.users.find({"role": "productor", "active": True}, PROJ):
+        await _notify(u["id"], type, title, message, link)
+        n += 1
+    return n
+
+
+async def _remove_unit_from_open_events(unit_id: str, material_name: str, unit_ref: str, reason: str) -> List[Dict[str, Any]]:
+    """Remove a unit from all open events' materials. Notify productores per event. Return affected events."""
+    affected = []
+    async for ev in db.events.find({"status": "abierto"}, PROJ):
+        changed = False
+        new_materials = []
+        for em in ev.get("materials", []):
+            kept_units = [u for u in em.get("units", []) if u.get("unit_id") != unit_id]
+            if len(kept_units) != len(em.get("units", [])):
+                changed = True
+                em = {**em, "units": kept_units, "qty": len(kept_units) if "qty" in em else em.get("qty")}
+            new_materials.append(em)
+        if changed:
+            await db.events.update_one({"id": ev["id"]}, {"$set": {"materials": new_materials}})
+            affected.append({"event_id": ev["id"], "event_name": ev.get("name", "")})
+            link = f"/eventos/{ev['id']}"
+            msg = (f"Se ha retirado <b>{unit_ref} · {material_name}</b> del evento "
+                   f"<b>{ev.get('name','')}</b> porque se ha reportado una incidencia ({reason}). "
+                   "Sustitúyelo antes del montaje.")
+            await _notify_productores("incident_removed_from_event",
+                                      f"Material retirado de {ev.get('name','')}",
+                                      msg, link)
+    return affected
+
+
+async def _remove_vehicle_from_open_events(vehicle_id: str, vehicle_label: str, reason: str) -> List[Dict[str, Any]]:
+    """Remove a vehicle from all open events. Notify productores."""
+    affected = []
+    async for ev in db.events.find({"status": "abierto"}, PROJ):
+        evs = ev.get("vehicles", []) or []
+        kept = [vh for vh in evs if not (vh.get("type") == "owned" and vh.get("vehicle_id") == vehicle_id)]
+        if len(kept) != len(evs):
+            await db.events.update_one({"id": ev["id"]}, {"$set": {"vehicles": kept}})
+            affected.append({"event_id": ev["id"], "event_name": ev.get("name", "")})
+            link = f"/eventos/{ev['id']}"
+            msg = (f"Se ha retirado el vehículo <b>{vehicle_label}</b> del evento "
+                   f"<b>{ev.get('name','')}</b> porque se ha reportado una incidencia ({reason}). "
+                   "Asígnale otro vehículo antes del montaje.")
+            await _notify_productores("incident_removed_from_event",
+                                      f"Vehículo retirado de {ev.get('name','')}",
+                                      msg, link)
+    return affected
+
+
 # ---------- Incidents ----------
 @api_router.post("/incidents")
 async def create_incident(payload: IncidentCreate, user: dict = Depends(get_current_user)):
@@ -1715,15 +1790,19 @@ async def create_incident(payload: IncidentCreate, user: dict = Depends(get_curr
         raise HTTPException(400, "unit_id o vehicle_id requerido")
     if payload.unit_id and payload.vehicle_id:
         raise HTTPException(400, "Solo unit_id o vehicle_id, no ambos")
+    affected_events: List[Dict[str, Any]] = []
     if payload.unit_id:
         u = await db.units.find_one({"id": payload.unit_id}, PROJ)
         if not u:
             raise HTTPException(404, "Unit not found")
-        async for ev in db.events.find({}, PROJ):
-            for em in ev.get("materials", []):
-                for unit in em.get("units", []):
-                    if unit["unit_id"] == payload.unit_id:
-                        raise HTTPException(400, "Unidad bloqueada en evento. Libera primero.")
+        # Si la unidad está en algún evento abierto, la retiramos y avisamos
+        m = await db.materials.find_one({"id": u["material_id"]}, PROJ)
+        affected_events = await _remove_unit_from_open_events(
+            payload.unit_id,
+            (m or {}).get("name", ""),
+            u.get("reference", ""),
+            payload.description or payload.status,
+        )
         await db.units.update_one(
             {"id": payload.unit_id},
             {"$set": {
@@ -1738,11 +1817,11 @@ async def create_incident(payload: IncidentCreate, user: dict = Depends(get_curr
         v = await db.vehicles.find_one({"id": payload.vehicle_id}, PROJ)
         if not v:
             raise HTTPException(404, "Vehicle not found")
-        # ensure not used in any future open event
-        async for ev in db.events.find({"status": "abierto"}, PROJ):
-            for ovh in ev.get("vehicles", []):
-                if ovh.get("type") == "owned" and ovh.get("vehicle_id") == payload.vehicle_id:
-                    raise HTTPException(400, f"Vehículo asignado al evento '{ev.get('name','')}'. Quítalo primero.")
+        affected_events = await _remove_vehicle_from_open_events(
+            payload.vehicle_id,
+            f"{v.get('plate','')} {v.get('name','')}".strip(),
+            payload.description or payload.status,
+        )
         await db.vehicles.update_one(
             {"id": payload.vehicle_id},
             {"$set": {
@@ -1754,7 +1833,7 @@ async def create_incident(payload: IncidentCreate, user: dict = Depends(get_curr
         log = IncidentLog(vehicle_id=payload.vehicle_id, type="report", status=payload.status,
                           description=payload.description, files=payload.files)
     await db.incident_logs.insert_one(log.model_dump())
-    return log
+    return {**log.model_dump(), "affected_events": affected_events}
 
 
 @api_router.get("/incidents")
@@ -1932,6 +2011,38 @@ async def update_incident(unit_id: str, payload: IncidentResolve):
     )
     await db.incident_logs.insert_one(log.model_dump())
     return log
+
+
+# ---------- Notifications ----------
+@api_router.get("/notifications")
+async def list_notifications(user: dict = Depends(get_current_user), limit: int = 50):
+    items = await db.notifications.find({"user_id": user["id"]}, PROJ).sort("created_at", -1).to_list(limit)
+    unread = await db.notifications.count_documents({"user_id": user["id"], "read": False})
+    return {"items": items, "unread": unread}
+
+
+@api_router.get("/notifications/unread-count")
+async def unread_count(user: dict = Depends(get_current_user)):
+    return {"unread": await db.notifications.count_documents({"user_id": user["id"], "read": False})}
+
+
+@api_router.post("/notifications/{nid}/read")
+async def mark_read(nid: str, user: dict = Depends(get_current_user)):
+    await db.notifications.update_one({"id": nid, "user_id": user["id"]}, {"$set": {"read": True}})
+    return {"ok": True}
+
+
+@api_router.post("/notifications/read-all")
+async def mark_all_read(user: dict = Depends(get_current_user)):
+    r = await db.notifications.update_many({"user_id": user["id"], "read": False}, {"$set": {"read": True}})
+    return {"ok": True, "updated": r.modified_count}
+
+
+@api_router.delete("/notifications/{nid}")
+async def delete_notification(nid: str, user: dict = Depends(get_current_user)):
+    await db.notifications.delete_one({"id": nid, "user_id": user["id"]})
+    return {"ok": True}
+
 
 
 # ---------- File upload ----------
