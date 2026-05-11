@@ -43,6 +43,8 @@ export default function Events() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [taskEditing, setTaskEditing] = useState(null);
   const [taskDefaultDate, setTaskDefaultDate] = useState(null);
+  // Filter calendar by technician(s) (empty array = no filter, shows all)
+  const [techFilter, setTechFilter] = useState([]);
 
   const load = async () => setEvents((await api.get("/events")).data);
   const loadTasks = async () => {
@@ -84,6 +86,17 @@ export default function Events() {
   }, [events, q]);
 
   const isBolo = form.type === "bolo";
+
+  // Apply technician filter to events and tasks shown in calendar
+  const filteredCalEvents = useMemo(() => {
+    if (techFilter.length === 0) return events;
+    return events.filter((e) => (e.assigned_technicians || []).some((tid) => techFilter.includes(tid)));
+  }, [events, techFilter]);
+  const filteredCalTasks = useMemo(() => {
+    if (techFilter.length === 0) return tasks;
+    return tasks.filter((t) => (t.assigned_technicians || []).some((tid) => techFilter.includes(tid)));
+  }, [tasks, techFilter]);
+
   return (
     <div data-testid="events-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
@@ -142,7 +155,48 @@ export default function Events() {
         </TabsContent>
 
         <TabsContent value="cal">
-          <MonthCalendar year={calYear} month={calMonth} events={events} tasks={tasks}
+          {/* Technician filter */}
+          {technicians.length > 0 && (
+            <div className="card-paper" style={{ marginBottom: 12, padding: 12, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }} data-testid="cal-tech-filter">
+              <span style={{ fontSize: 11, color: "var(--ink-mute)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "JetBrains Mono, monospace", marginRight: 6 }}>Filtrar por técnico:</span>
+              <button
+                onClick={() => setTechFilter([])}
+                data-testid="cal-filter-all"
+                style={{
+                  padding: "5px 12px", borderRadius: 999, fontSize: 12, fontWeight: 500, cursor: "pointer",
+                  background: techFilter.length === 0 ? "var(--accent)" : "#fff",
+                  color: techFilter.length === 0 ? "#fff" : "var(--ink)",
+                  border: `1px solid ${techFilter.length === 0 ? "var(--accent)" : "var(--line)"}`,
+                }}
+              >
+                Todos
+              </button>
+              {technicians.map((t) => {
+                const on = techFilter.includes(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTechFilter(on ? techFilter.filter((x) => x !== t.id) : [...techFilter, t.id])}
+                    data-testid={`cal-filter-${t.email}`}
+                    style={{
+                      padding: "5px 12px", borderRadius: 999, fontSize: 12, fontWeight: 500, cursor: "pointer",
+                      background: on ? "var(--accent)" : "#fff",
+                      color: on ? "#fff" : "var(--ink)",
+                      border: `1px solid ${on ? "var(--accent)" : "var(--line)"}`,
+                    }}
+                  >
+                    {t.name || t.email}
+                  </button>
+                );
+              })}
+              {techFilter.length > 0 && (
+                <span style={{ fontSize: 11, color: "var(--ink-mute)", marginLeft: 6 }}>
+                  · {filteredCalEvents.length} eventos · {filteredCalTasks.length} tareas
+                </span>
+              )}
+            </div>
+          )}
+          <MonthCalendar year={calYear} month={calMonth} events={filteredCalEvents} tasks={filteredCalTasks}
             onPrev={() => { if (calMonth === 0) { setCalYear(calYear - 1); setCalMonth(11); } else setCalMonth(calMonth - 1); }}
             onNext={() => { if (calMonth === 11) { setCalYear(calYear + 1); setCalMonth(0); } else setCalMonth(calMonth + 1); }}
             onToday={() => { setCalYear(today.getFullYear()); setCalMonth(today.getMonth()); }}
