@@ -205,6 +205,21 @@ export default function EventPrepare() {
         <ArrowLeft size={14} /> Volver al evento
       </Link>
 
+      {!ev.material_ready_for_prep && !isPrepLocked && (
+        <div
+          className="card-paper"
+          style={{ background: "#fef3c7", border: "1px solid #fcd34d", padding: 14, marginBottom: 18, display: "flex", alignItems: "center", gap: 10 }}
+          data-testid="prep-not-ready-banner"
+        >
+          <Lock size={16} color="#92400e" />
+          <div>
+            <div style={{ fontWeight: 700, color: "#92400e" }}>El productor todavía no ha marcado el evento como listo</div>
+            <div style={{ fontSize: 12, color: "#92400e", marginTop: 2 }}>
+              No se pueden hacer cambios en la preparación hasta que el productor pulse <b>"Listo para preparar"</b> en la página del evento.
+            </div>
+          </div>
+        </div>
+      )}
       {/* Header (PDF-like) */}
       <div className="card-paper" style={{ marginBottom: 18, padding: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", borderBottom: "1px solid var(--ink)", paddingBottom: 12, marginBottom: 14 }}>

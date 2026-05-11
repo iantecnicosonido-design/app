@@ -278,8 +278,11 @@ export default function EventDetail() {
 
   // ---------- Preparación state (read-only here, full editor in /preparacion page) ----------
   const isAlmacen = user?.role === "almacen";
+  const isProductor = user?.role === "productor";
   const isPrepLocked = ev?.prep_status === "preparado";
-  const canMaterial = _canMaterial && !isPrepLocked;
+  const isMaterialReady = !!ev?.material_ready_for_prep;
+  // Productor pierde la capacidad de editar material cuando el evento ya está "Listo para preparar"
+  const canMaterial = _canMaterial && !isPrepLocked && !(isMaterialReady && !isAlmacen);
 
   // Flatten all blocked units + rentals for the prep summary (X/Y)
   const prepRows = [
@@ -324,6 +327,23 @@ export default function EventDetail() {
     await api.delete(`/events/${id}`); toast.success("Eliminado"); navigate("/eventos");
   };
   const exportPDF = () => window.open(`${API}/events/${id}/export`, "_blank");
+
+  const markReadyForPrep = async () => {
+    try {
+      const r = await api.post(`/events/${id}/mark-ready-for-prep`);
+      setEv(r.data);
+      toast.success("Evento listo para preparar. Almacén notificado.");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+  const unmarkReadyForPrep = async () => {
+    if (!window.confirm("¿Desbloquear edición de material? Almacén dejará de poder preparar hasta que vuelvas a marcarlo.")) return;
+    try {
+      const r = await api.post(`/events/${id}/unmark-ready-for-prep`);
+      setEv(r.data);
+      toast.success("Edición de material reabierta");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
 
   const grouped = {};
   categories.forEach((c) => { grouped[c.key] = []; });
@@ -375,11 +395,24 @@ export default function EventDetail() {
           {(isAlmacen || canEditFicha) && totalUnits > 0 && (
             <Button
               onClick={() => navigate(`/eventos/${id}/preparacion`)}
-              style={{ background: isPrepLocked ? "var(--good)" : "#3730a3" }}
+              disabled={isAlmacen && !isMaterialReady && !isPrepLocked}
+              style={{ background: isPrepLocked ? "var(--good)" : (isAlmacen && !isMaterialReady ? "#a8a29e" : "#3730a3"), opacity: isAlmacen && !isMaterialReady && !isPrepLocked ? 0.6 : 1 }}
+              title={isAlmacen && !isMaterialReady && !isPrepLocked ? "Esperando a que el productor marque el evento como listo" : ""}
               data-testid="open-prepare-btn"
             >
               <Package size={16} /> {isPrepLocked ? "Preparado" : "Preparar"}
             </Button>
+          )}
+          {isProductor && totalUnits > 0 && !isPrepLocked && (
+            isMaterialReady ? (
+              <Button onClick={unmarkReadyForPrep} variant="outline" style={{ borderColor: "var(--warn)", color: "var(--warn)" }} data-testid="unmark-ready-btn">
+                <Unlock size={16} /> Desbloquear edición
+              </Button>
+            ) : (
+              <Button onClick={markReadyForPrep} style={{ background: "#0f766e" }} data-testid="mark-ready-btn">
+                <Lock size={16} /> Listo para preparar
+              </Button>
+            )
           )}
           <Button variant="outline" onClick={exportPDF} data-testid="export-pdf-btn"><FileDown size={16} /> PDF</Button>
           {canClose && (!isClosed ? <Button onClick={closeEvent} style={{ background: "#1c1917" }}><Lock size={16} /> Cerrar</Button> : <Button onClick={reopenEvent} variant="outline"><Unlock size={16} /> Reabrir</Button>)}
@@ -392,23 +425,40 @@ export default function EventDetail() {
         <div
           className="card-paper"
           style={{
-            background: isPrepLocked ? "#dcfce7" : "#f5f5f4",
-            border: `1px solid ${isPrepLocked ? "#86efac" : "var(--line)"}`,
+            background: isPrepLocked ? "#dcfce7" : (isMaterialReady ? "#fef3c7" : "#f5f5f4"),
+            border: `1px solid ${isPrepLocked ? "#86efac" : (isMaterialReady ? "#fcd34d" : "var(--line)")}`,
             padding: 14, marginBottom: 18,
             display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap",
           }}
           data-testid="prep-status-banner"
         >
           <div>
-            <div style={{ fontWeight: 700, color: isPrepLocked ? "#166534" : "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
-              {isPrepLocked ? <Lock size={16} /> : <Package size={16} />}
+            <div style={{ fontWeight: 700, color: isPrepLocked ? "#166534" : (isMaterialReady ? "#92400e" : "var(--ink)"), display: "flex", alignItems: "center", gap: 8 }}>
+              {isPrepLocked ? <Lock size={16} /> : (isMaterialReady ? <Lock size={16} /> : <Package size={16} />)}
               {isPrepLocked
                 ? `Material preparado y bloqueado por ${ev.prep_locked_by_name || "Almacén"}`
-                : `Preparación pendiente · ${checkedCount}/${totalUnits} unidades preparadas`}
+                : (isMaterialReady
+                  ? `Listo para preparar · ${checkedCount}/${totalUnits} unidades preparadas · material bloqueado para edición`
+                  : `Pendiente de marcar como listo · ${checkedCount}/${totalUnits} unidades`)}
             </div>
             {isPrepLocked && (
               <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
                 {ev.prep_locked_at ? new Date(ev.prep_locked_at).toLocaleString("es-ES") : ""} · Nadie puede modificar material/vehículos hasta que Almacén lo desbloquee.
+              </div>
+            )}
+            {!isPrepLocked && isMaterialReady && (
+              <div style={{ fontSize: 12, color: "#92400e", marginTop: 2 }}>
+                Marcado por {ev.material_ready_by_name || "Productor"} · {ev.material_ready_at ? new Date(ev.material_ready_at).toLocaleString("es-ES") : ""}. Solo Almacén puede modificar material ahora.
+              </div>
+            )}
+            {!isPrepLocked && !isMaterialReady && isProductor && (
+              <div style={{ fontSize: 12, color: "var(--ink-mute)", marginTop: 2 }}>
+                Cuando termines de cuadrar el material, pulsa <b>"Listo para preparar"</b> para que Almacén pueda empezar.
+              </div>
+            )}
+            {!isPrepLocked && !isMaterialReady && isAlmacen && (
+              <div style={{ fontSize: 12, color: "var(--ink-mute)", marginTop: 2 }}>
+                Esperando a que el productor marque el evento como listo.
               </div>
             )}
           </div>

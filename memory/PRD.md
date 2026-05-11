@@ -83,6 +83,15 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Nueva colección `notifications` + modelo `Notification` (id, user_id, type, title, message, link, read, created_at)
   - Endpoints CRUD: `GET /notifications` (con unread count), `GET /notifications/unread-count`, `POST /notifications/{id}/read`, `POST /notifications/read-all`, `DELETE /notifications/{id}`
   - Frontend: nuevo componente `NotificationBell` en sidebar (Layout.jsx) con badge rojo de no leídas, dropdown con últimas 30 notifs (poll cada 30s), click marca leída y navega al link del evento. Helpers backend: `_notify(user_id, ...)`, `_notify_productores(...)`, `_remove_unit_from_open_events(...)`, `_remove_vehicle_from_open_events(...)`
+- ✅ **Estado "Listo para preparar" controlado por productor (Feb 2026)**:
+  - Nuevos campos en Event: `material_ready_for_prep: bool`, `material_ready_at`, `material_ready_by`, `material_ready_by_name`
+  - Nuevos endpoints (solo productor): `POST /events/{eid}/mark-ready-for-prep`, `POST /events/{eid}/unmark-ready-for-prep`
+  - `_assert_event_modifiable(eid, user)` ahora acepta `user` opcional; si `material_ready_for_prep=True` y user no es almacen → 423
+  - Todos los endpoints de edición de material/vehículos/alquileres del evento pasan `user`
+  - Todos los endpoints de preparación (`prep/check-unit`, `prep/check-batch`, `prep/substitute`, `prep/remove-unit`, `prep/lock`) llaman a `_assert_ready_for_prep(ev)` → 423 si productor no ha marcado listo
+  - Al marcar listo: notifica a todos los almacén activos con link `/eventos/{eid}/preparacion`
+  - Productor puede desmarcar SOLO si almacén aún no ha bloqueado (`prep_status="pendiente"`)
+  - Frontend: botón verde "🔒 Listo para preparar" (productor) → cambia a outline "🔓 Desbloquear edición" cuando ya está marcado. Botón "Preparar" deshabilitado para almacén hasta que esté marcado (tooltip "Esperando productor"). Banner amarillo con estado claro y texto explicativo según rol.
 
 ## Backlog
 ### P1

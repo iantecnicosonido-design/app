@@ -68,8 +68,10 @@ def _strip_accents(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
 
 
-async def _assert_event_modifiable(eid: str) -> dict:
-    """Return event if it can be modified; raise if closed or prep-locked."""
+async def _assert_event_modifiable(eid: str, user: Optional[dict] = None) -> dict:
+    """Return event if it can be modified; raise if closed or prep-locked.
+    If `user` is given and event has material_ready_for_prep=True, only almacén can edit material.
+    """
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -77,6 +79,8 @@ async def _assert_event_modifiable(eid: str) -> dict:
         raise HTTPException(400, "Evento cerrado")
     if ev.get("prep_status") == "preparado":
         raise HTTPException(423, "Evento bloqueado por Almacén. Desbloquéalo para hacer cambios.")
+    if ev.get("material_ready_for_prep") and user is not None and user.get("role") != "almacen":
+        raise HTTPException(423, "Material bloqueado para preparación. Solo Almacén puede modificarlo. El productor debe 'Desbloquear edición' primero.")
     return ev
 
 
@@ -311,6 +315,13 @@ class Event(BaseModel):
     prep_locked_by: Optional[str] = None
     prep_locked_by_name: str = ""
     prep_log: List[Dict[str, Any]] = []
+    # Listo para preparar: hasta que el productor pulse el botón, almacén no puede preparar
+    # y el productor puede editar materiales. Cuando pasa a True, los materiales quedan bloqueados
+    # para el productor y solo almacén puede modificarlos.
+    material_ready_for_prep: bool = False
+    material_ready_at: Optional[str] = None
+    material_ready_by: Optional[str] = None
+    material_ready_by_name: str = ""
     # Alquileres only — delivery & return
     delivery: Optional[Dict[str, Any]] = None
     return_info: Optional[Dict[str, Any]] = None
@@ -1077,8 +1088,8 @@ async def event_availability(eid: str, material_id: str, user: dict = Depends(ge
 
 
 # ---------- Block / unblock material ----------
-async def _block_units(eid: str, material_id: str, unit_ids: List[str]):
-    ev = await _assert_event_modifiable(eid)
+async def _block_units(eid: str, material_id: str, unit_ids: List[str], user: Optional[dict] = None):
+    ev = await _assert_event_modifiable(eid, user)
     M = await db.materials.find_one({"id": material_id}, PROJ)
     if not M:
         raise HTTPException(404, "Material not found")
@@ -1154,10 +1165,10 @@ async def _block_units(eid: str, material_id: str, unit_ids: List[str]):
 
 
 @api_router.post("/events/{eid}/materials")
-async def block_material(eid: str, payload: BlockMaterialRequest, _u: dict = Depends(require_warehouse)):
-    await _assert_event_modifiable(eid)
+async def block_material(eid: str, payload: BlockMaterialRequest, user: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid, user)
     if payload.unit_ids:
-        return await _block_units(eid, payload.material_id, payload.unit_ids)
+        return await _block_units(eid, payload.material_id, payload.unit_ids, user)
     if payload.quantity is None or payload.quantity < 0:
         raise HTTPException(400, "quantity o unit_ids requerido")
     if payload.quantity == 0:
@@ -1170,12 +1181,12 @@ async def block_material(eid: str, payload: BlockMaterialRequest, _u: dict = Dep
     if len(avail_units) < payload.quantity:
         raise HTTPException(400, f"Solo {len(avail_units)} unidades disponibles, pides {payload.quantity}")
     chosen = [u["id"] for u in avail_units[: payload.quantity]]
-    return await _block_units(eid, payload.material_id, chosen)
+    return await _block_units(eid, payload.material_id, chosen, user)
 
 
 @api_router.delete("/events/{eid}/materials/{material_id}")
-async def unblock_material(eid: str, material_id: str, _u: dict = Depends(require_warehouse)):
-    await _assert_event_modifiable(eid)
+async def unblock_material(eid: str, material_id: str, user: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid, user)
     await db.events.update_one({"id": eid}, {"$pull": {"materials": {"material_id": material_id}}})
     # also clean prep_checks of units that belonged to this material
     ev = await db.events.find_one({"id": eid}, PROJ)
@@ -1277,8 +1288,8 @@ async def set_cable_distribution(eid: str, payload: CableDistributionRequest, _u
 
 
 @api_router.post("/events/{eid}/rentals")
-async def add_rental(eid: str, payload: RentalCreate, _u: dict = Depends(require_warehouse)):
-    await _assert_event_modifiable(eid)
+async def add_rental(eid: str, payload: RentalCreate, user: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid, user)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1298,8 +1309,8 @@ async def add_rental(eid: str, payload: RentalCreate, _u: dict = Depends(require
 
 
 @api_router.delete("/events/{eid}/rentals/{rid}")
-async def remove_rental(eid: str, rid: str, _u: dict = Depends(require_warehouse)):
-    await _assert_event_modifiable(eid)
+async def remove_rental(eid: str, rid: str, user: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid, user)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1338,8 +1349,8 @@ async def event_vehicle_availability(eid: str):
 
 
 @api_router.post("/events/{eid}/vehicles")
-async def add_event_vehicle(eid: str, payload: EventVehicleAdd, _u: dict = Depends(require_warehouse)):
-    await _assert_event_modifiable(eid)
+async def add_event_vehicle(eid: str, payload: EventVehicleAdd, user: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid, user)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1374,7 +1385,8 @@ async def add_event_vehicle(eid: str, payload: EventVehicleAdd, _u: dict = Depen
 
 
 @api_router.delete("/events/{eid}/vehicles/{vid}")
-async def remove_event_vehicle(eid: str, vid: str, _u: dict = Depends(require_warehouse)):
+async def remove_event_vehicle(eid: str, vid: str, user: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid, user)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1430,12 +1442,19 @@ def _prep_locked_block_unless_almacen(ev: dict, user: dict):
         raise HTTPException(403, "Solo Almacén puede modificar la preparación")
 
 
+def _assert_ready_for_prep(ev: dict) -> None:
+    """Block prep ops if the productor hasn't marked the event as ready for prep."""
+    if not ev.get("material_ready_for_prep"):
+        raise HTTPException(423, "El productor todavía no ha marcado el evento como 'Listo para preparar'.")
+
+
 @api_router.post("/events/{eid}/prep/check-unit")
 async def prep_check_unit(eid: str, payload: PrepCheckUnitRequest, user: dict = Depends(get_current_user)):
     _prep_locked_block_unless_almacen({}, user)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
+    _assert_ready_for_prep(ev)
     if ev.get("prep_status") == "preparado":
         raise HTTPException(423, "Evento bloqueado. Desbloquea primero.")
     checks = list(ev.get("prep_checks") or [])
@@ -1455,6 +1474,9 @@ async def prep_check_unit(eid: str, payload: PrepCheckUnitRequest, user: dict = 
 async def prep_substitute(eid: str, payload: PrepSubstituteRequest, user: dict = Depends(get_current_user)):
     _prep_locked_block_unless_almacen({}, user)
     ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    _assert_ready_for_prep(ev)
     if not ev:
         raise HTTPException(404, "Event not found")
     if ev.get("prep_status") == "preparado":
@@ -1580,6 +1602,7 @@ async def prep_check_batch(eid: str, payload: PrepCheckBatchRequest, user: dict 
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
+    _assert_ready_for_prep(ev)
     if ev.get("prep_status") == "preparado":
         raise HTTPException(423, "Evento bloqueado. Desbloquea primero.")
     checks = set(ev.get("prep_checks") or [])
@@ -1605,6 +1628,7 @@ async def prep_remove_unit(eid: str, payload: PrepRemoveRequest, user: dict = De
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
+    _assert_ready_for_prep(ev)
     if ev.get("prep_status") == "preparado":
         raise HTTPException(423, "Evento bloqueado. Desbloquea primero.")
     em = next((m for m in ev.get("materials", []) if m["material_id"] == payload.material_id), None)
@@ -1639,6 +1663,7 @@ async def prep_lock(eid: str, user: dict = Depends(require_almacen)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
+    _assert_ready_for_prep(ev)
     if ev.get("status") == "cerrado":
         raise HTTPException(400, "Evento cerrado")
     log = list(ev.get("prep_log") or [])
@@ -1666,6 +1691,61 @@ async def prep_unlock(eid: str, user: dict = Depends(require_almacen)):
         "prep_log": log,
     }})
     return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/mark-ready-for-prep")
+async def mark_ready_for_prep(eid: str, user: dict = Depends(require_productor)):
+    """Productor marca el evento como listo para preparar. Notifica a almacén y bloquea
+    la edición de material para el productor (solo almacén podrá modificarlo)."""
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("status") == "cerrado":
+        raise HTTPException(400, "Evento cerrado")
+    if ev.get("material_ready_for_prep"):
+        raise HTTPException(400, "El evento ya está marcado como listo para preparar")
+    now = datetime.now(timezone.utc).isoformat()
+    log = list(ev.get("prep_log") or [])
+    log.append(_prep_log_entry("ready_for_prep", user))
+    await db.events.update_one({"id": eid}, {"$set": {
+        "material_ready_for_prep": True,
+        "material_ready_at": now,
+        "material_ready_by": user["id"],
+        "material_ready_by_name": user.get("name") or user.get("email", ""),
+        "prep_log": log,
+    }})
+    # Notificar a todos los usuarios con rol almacen (los que pueden preparar)
+    link = f"/eventos/{eid}/preparacion"
+    title = f"Listo para preparar: {ev.get('name','')}"
+    msg = (f"El productor ha marcado <b>{ev.get('name','')}</b> como listo para preparar. "
+           "Puedes empezar la preparación cuando quieras.")
+    async for u in db.users.find({"role": "almacen", "active": True}, PROJ):
+        await _notify(u["id"], "ready_for_prep", title, msg, link)
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/unmark-ready-for-prep")
+async def unmark_ready_for_prep(eid: str, user: dict = Depends(require_productor)):
+    """Productor desbloquea la edición de material. Solo posible si almacén aún NO ha bloqueado (prep_status='pendiente')."""
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if not ev.get("material_ready_for_prep"):
+        raise HTTPException(400, "El evento no está marcado como listo")
+    if ev.get("prep_status") == "preparado":
+        raise HTTPException(423, "Almacén ya ha bloqueado la preparación. Pide que la desbloquee antes.")
+    log = list(ev.get("prep_log") or [])
+    log.append(_prep_log_entry("unmark_ready_for_prep", user))
+    await db.events.update_one({"id": eid}, {"$set": {
+        "material_ready_for_prep": False,
+        "material_ready_at": None,
+        "material_ready_by": None,
+        "material_ready_by_name": "",
+        "prep_log": log,
+    }})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
 
 
 # ---------- Packs ----------
