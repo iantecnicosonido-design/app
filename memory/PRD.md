@@ -102,12 +102,14 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Email de asignación actualizado: título "Te han asignado un evento — pendiente de aceptar", CTA "Ver y aceptar bolo" apunta a `/eventos/{id}`
   - Frontend: banner amarillo gigante en EventDetail para el técnico asignado con status pendiente/rechazado con botones "✓ Aceptar bolo" / "X Rechazar". Badge PENDIENTE/ACEPTADO/RECHAZADO en cada chip de técnico (visible para productor)
 - ✅ **Duplicar material de evento anterior con resolución de conflictos (Feb 2026)**:
-  - Si el productor crea un bolo/alquiler con un nombre que coincide con otro evento anterior, aparece botón "Copiar de evento anterior" en sección Material con badge de número de candidatos
-  - Nuevos endpoints: `GET /events/similar-by-name?name=X&exclude=eid`, `GET /events/{eid}/duplicate-preview?source=eid_src`, `POST /events/{eid}/duplicate-from`
-  - Modal en 2 pasos: 1) selecciona evento origen entre candidatos con mismo nombre, 2) tabla con cada material y su disponibilidad real ahora. Para cada uno: copiar / sustituir (con search-select de sustituto + input cantidad) / eliminar
-  - Items con stock insuficiente aparecen en rojo con badge "Faltan N"; el dialog auto-marca esos como "sustituir" por defecto
-  - Aplicar es atómico-best-effort: cada item se aplica individualmente y se reportan los fallos al final via toast
-  - Nuevo componente: `/app/frontend/src/components/DuplicateMaterialDialog.jsx`
+  - Botón "Copiar de otro evento" en sección Material (visible siempre para roles con permiso de editar material)
+  - Endpoint `GET /events/with-materials?q=&exclude=&limit=` busca cualquier evento con material por nombre/cliente/referencia (case+accent insensitive)
+  - Endpoint legacy `GET /events/similar-by-name` se mantiene
+  - `GET /events/{eid}/duplicate-preview?source=eid_src` calcula disponibilidad real ahora para cada material del origen
+  - `POST /events/{eid}/duplicate-from` aplica resoluciones (`copy|substitute|skip`)
+  - Modal 2 pasos: 1) **buscador en vivo** + lista de eventos con material disponible, 2) tabla con materiales del origen y su disponibilidad. Para cada uno: copiar / sustituir / eliminar
+  - Items sin stock aparecen en rojo con badge "Faltan N" y se auto-marcan como "sustituir" por defecto
+  - Componente: `/app/frontend/src/components/DuplicateMaterialDialog.jsx`
 
 ## Backlog
 ### P1

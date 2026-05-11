@@ -997,6 +997,42 @@ async def events_similar_by_name(name: str, exclude: str = "", user: dict = Depe
     return out[:50]
 
 
+@api_router.get("/events/with-materials")
+async def events_with_materials(q: str = "", exclude: str = "", limit: int = 30, user: dict = Depends(get_current_user)):
+    """Search ANY event with blocked material. Matches name/client/reference (case+accent insensitive)."""
+    query = {}
+    if exclude:
+        query["id"] = {"$ne": exclude}
+    all_events = await db.events.find(query, PROJ).sort("created_at", -1).to_list(2000)
+    norm_q = _normalize_login(q)
+    out = []
+    for ev in all_events:
+        units_count = sum(len(m.get("units") or []) for m in (ev.get("materials") or []))
+        if units_count == 0:
+            continue
+        if norm_q:
+            haystack = " ".join([
+                _normalize_login(ev.get("name", "")),
+                _normalize_login(ev.get("client_name", "")),
+                _normalize_login(ev.get("reference", "")),
+            ])
+            if norm_q not in haystack:
+                continue
+        out.append({
+            "id": ev["id"],
+            "name": ev["name"],
+            "type": ev.get("type"),
+            "client_name": ev.get("client_name", ""),
+            "reference": ev.get("reference", ""),
+            "event_date": ev.get("event_date") or ev.get("setup_date") or "",
+            "materials_count": len(ev.get("materials") or []),
+            "units_count": units_count,
+        })
+        if len(out) >= max(1, min(limit, 100)):
+            break
+    return out
+
+
 
 @api_router.get("/events/{eid}", response_model=Event)
 async def get_event(eid: str, user: dict = Depends(get_current_user)):

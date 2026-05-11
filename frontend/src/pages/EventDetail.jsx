@@ -69,7 +69,6 @@ export default function EventDetail() {
   const [returnOpen, setReturnOpen] = useState(false);
   const [checkOpen, setCheckOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
-  const [dupCandidatesCount, setDupCandidatesCount] = useState(0);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -87,14 +86,6 @@ export default function EventDetail() {
     api.get("/technicians").then((r) => setTechnicians(r.data)).catch(() => {});
     /* eslint-disable-next-line */
   }, [id]);
-
-  // Detect duplicate candidates whenever event name changes / loads
-  useEffect(() => {
-    if (!ev?.name) { setDupCandidatesCount(0); return; }
-    api.get("/events/similar-by-name", { params: { name: ev.name, exclude: id } })
-      .then((r) => setDupCandidatesCount((r.data || []).length))
-      .catch(() => setDupCandidatesCount(0));
-  }, [ev?.name, id]);
 
   useEffect(() => {
     if (pickedMat) {
@@ -580,11 +571,8 @@ export default function EventDetail() {
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material bloqueado del stock</h3>
           {canMaterial && !isClosed && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button onClick={() => setDupOpen(true)} variant="outline" size="sm" data-testid="duplicate-material-btn" title={dupCandidatesCount > 0 ? `Hay ${dupCandidatesCount} evento(s) anterior(es) con el mismo nombre` : "Copiar material de un evento anterior con el mismo nombre"}>
-                <Copy size={14} /> Copiar de evento anterior
-                {dupCandidatesCount > 0 && (
-                  <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", background: "var(--accent)", color: "#fff", borderRadius: 999, fontFamily: "JetBrains Mono, monospace" }}>{dupCandidatesCount}</span>
-                )}
+              <Button onClick={() => setDupOpen(true)} variant="outline" size="sm" data-testid="duplicate-material-btn" title="Buscar un evento existente y copiar su material">
+                <Copy size={14} /> Copiar de otro evento
               </Button>
               <Button onClick={() => setPackOpen(true)} variant="outline" size="sm" data-testid="apply-pack-btn"><Package size={14} /> Aplicar pack</Button>
               <Button onClick={() => setMatOpen(true)} style={{ background: "var(--accent)" }} size="sm" data-testid="block-material-btn"><Plus size={14} /> Bloquear material</Button>

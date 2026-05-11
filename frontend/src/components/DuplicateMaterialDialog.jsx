@@ -10,18 +10,27 @@ import { toast } from "sonner";
 export default function DuplicateMaterialDialog({ open, onOpenChange, eventId, eventName, allMaterials, onApplied }) {
   const [step, setStep] = useState("pick");
   const [candidates, setCandidates] = useState([]);
+  const [searchQ, setSearchQ] = useState("");
   const [sourceId, setSourceId] = useState(null);
   const [preview, setPreview] = useState(null);
   const [resolutions, setResolutions] = useState({}); // { material_id: {action, quantity, substitute_with} }
   const [loading, setLoading] = useState(false);
 
+  // load candidates when dialog opens and whenever search changes
   useEffect(() => {
-    if (!open || !eventName) return;
+    if (!open) return;
     setStep("pick"); setSourceId(null); setPreview(null); setResolutions({});
-    api.get("/events/similar-by-name", { params: { name: eventName, exclude: eventId } })
-      .then((r) => setCandidates(r.data || []))
-      .catch(() => setCandidates([]));
-  }, [open, eventName, eventId]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => {
+      api.get("/events/with-materials", { params: { q: searchQ, exclude: eventId, limit: 30 } })
+        .then((r) => setCandidates(r.data || []))
+        .catch(() => setCandidates([]));
+    }, 200);
+    return () => clearTimeout(t);
+  }, [open, searchQ, eventId]);
 
   const loadPreview = async (sid) => {
     setSourceId(sid); setLoading(true);
@@ -74,13 +83,24 @@ export default function DuplicateMaterialDialog({ open, onOpenChange, eventId, e
 
         {step === "pick" && (
           <div>
+            <div style={{ marginBottom: 12 }}>
+              <Input
+                autoFocus
+                placeholder="Buscar por nombre del evento, cliente o referencia..."
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                data-testid="dup-search-input"
+              />
+              <p style={{ fontSize: 11, color: "var(--ink-mute)", marginTop: 6, fontFamily: "JetBrains Mono, monospace", letterSpacing: "0.04em" }}>
+                {candidates.length} evento(s) con material disponibles
+              </p>
+            </div>
             {candidates.length === 0 ? (
-              <p style={{ color: "var(--ink-mute)", fontSize: 14, padding: 20 }}>
-                No hay eventos anteriores con el mismo nombre y material asignado.
+              <p style={{ color: "var(--ink-mute)", fontSize: 14, padding: 20, textAlign: "center" }}>
+                No se encontró ningún evento con material que coincida con la búsqueda.
               </p>
             ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                <p style={{ fontSize: 13, color: "var(--ink-mute)" }}>Selecciona el evento de origen:</p>
+              <div style={{ display: "grid", gap: 8, maxHeight: 440, overflowY: "auto" }}>
                 {candidates.map((c) => (
                   <button
                     key={c.id}
@@ -93,13 +113,16 @@ export default function DuplicateMaterialDialog({ open, onOpenChange, eventId, e
                       display: "flex", justifyContent: "space-between", alignItems: "center",
                     }}
                   >
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{c.name}</div>
-                      <div style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                        {c.event_date} · {c.type} · {c.client_name || "sin cliente"}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {c.name}
+                        {c.reference && <span style={{ fontSize: 10, padding: "2px 6px", background: "#f5f5f4", borderRadius: 4, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace" }}>{c.reference}</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 2 }}>
+                        {c.event_date || "—"} · {c.type} · {c.client_name || "sin cliente"}
                       </div>
                     </div>
-                    <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontFamily: "JetBrains Mono, monospace" }}>
+                    <span style={{ fontSize: 11, padding: "4px 10px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontFamily: "JetBrains Mono, monospace", whiteSpace: "nowrap", marginLeft: 12 }}>
                       {c.units_count} unidades
                     </span>
                   </button>
