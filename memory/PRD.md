@@ -57,10 +57,12 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - **Comprobación** (paso final interno): solo accesible tras devolución. Almacén/Productor marca cada item devuelto como **OK** o **NO OK**. NO OK → unidad averiada + incidencia auto "dañado", con posibilidad de adjuntar archivo/foto desde cámara móvil que queda guardada en la incidencia. Items que ya eran FALTA aparecen en read-only. Genera PDF interno "ACTA DE COMPROBACIÓN · ALQUILER" con resumen OK/NO OK/FALTA
   - Panel en evento muestra 4 estados (Pendiente entrega / Entregado / Pendiente comprobación / Comprobado) con PDFs descargables de cada paso + DNI
 - ✅ Tests automatizados pasados (24/24 backend, 7/7 frontend)
+- ✅ **Migración email Resend → Brevo (Feb 2026)**: `emailer.py` reescrito para usar Brevo API v3 vía httpx async. Mantiene misma interfaz `send_email(to, subject, html, text, attachments)`, por lo que todos los flujos siguen funcionando (asignación técnicos, reset password, bienvenida, entrega/devolución/comprobación con PDF adjunto). Variables: `BREVO_API_KEY`, `SENDER_EMAIL`, `SENDER_NAME`. Probado en producción con adjunto PDF ✅
 
 ## Backlog
 ### P1
-- Integrar Resend para envío real de email (reset password + notificaciones técnicos/clientes)
+- Favicon (convertir `/app/frontend/public/logo.png` a 32x32 favicon.ico)
+- Verificar `ianedisonrent@gmail.com` como sender en Brevo para evitar carpeta SPAM
 
 ### P2
 - Logo personalizable en PDF
