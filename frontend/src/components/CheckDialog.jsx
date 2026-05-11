@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "./ui/dialog";
+import { Plus, Camera, X } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -30,9 +31,10 @@ export function CheckDialog({ open, onClose, event, onSaved }) {
         id: it.id, kind: it.kind, material_id: it.material_id || meta?.material_id || null,
         material_name: meta?.name || "—", reference: meta?.reference || "—",
         category: meta?.category || "—", quantity: meta?.quantity,
-        return_status: it.status,            // "returned" or "missing"
+        return_status: it.status,
         check_status: it.status === "returned" ? "ok" : "missing",
         note: it.note || "",
+        files: [],
       };
     });
   }, [event]);
@@ -46,6 +48,24 @@ export function CheckDialog({ open, onClose, event, onSaved }) {
   };
   const setItemNote = (id, note) => {
     setItems((arr) => arr.map((it) => it.id === id ? { ...it, note } : it));
+  };
+
+  const uploadFiles = async (id, fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    const added = [];
+    try {
+      for (const f of fileList) {
+        const fd = new FormData();
+        fd.append("file", f);
+        const r = await api.post("/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+        added.push({ file_id: r.data.id, name: r.data.name, content_type: r.data.content_type });
+      }
+      setItems((arr) => arr.map((it) => it.id === id ? { ...it, files: [...(it.files || []), ...added] } : it));
+    } catch { toast.error("Error subiendo foto"); }
+  };
+
+  const removeFile = (id, fileId) => {
+    setItems((arr) => arr.map((it) => it.id === id ? { ...it, files: (it.files || []).filter((f) => f.file_id !== fileId) } : it));
   };
 
   const counts = items.reduce((acc, it) => {
@@ -63,6 +83,7 @@ export function CheckDialog({ open, onClose, event, onSaved }) {
           .map((it) => ({
             id: it.id, kind: it.kind, material_id: it.material_id || null,
             status: it.check_status, note: it.note || "",
+            files: it.check_status === "nok" ? (it.files || []) : [],
           })),
       };
       await api.post(`/events/${event.id}/check`, payload);
@@ -130,12 +151,30 @@ export function CheckDialog({ open, onClose, event, onSaved }) {
                   </div>
                 </div>
                 {!isMissing && it.check_status === "nok" && (
-                  <Input
-                    placeholder="Nota / detalle del daño (opcional)"
-                    value={it.note} onChange={(e) => setItemNote(it.id, e.target.value)}
-                    style={{ marginTop: 6, fontSize: 12 }}
-                    data-testid={`check-${it.id}-note`}
-                  />
+                  <>
+                    <Input
+                      placeholder="Nota / detalle del daño (opcional)"
+                      value={it.note} onChange={(e) => setItemNote(it.id, e.target.value)}
+                      style={{ marginTop: 6, fontSize: 12 }}
+                      data-testid={`check-${it.id}-note`}
+                    />
+                    <div style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 11, cursor: "pointer", color: "var(--accent)", fontWeight: 600 }}>
+                        <Plus size={12} /> Archivo
+                        <input type="file" multiple style={{ display: "none" }} onChange={(e) => uploadFiles(it.id, e.target.files)} data-testid={`check-${it.id}-file`} />
+                      </label>
+                      <label style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", border: "1px dashed var(--line)", borderRadius: 4, fontSize: 11, cursor: "pointer", color: "var(--accent)", fontWeight: 600 }}>
+                        <Camera size={12} /> Foto
+                        <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => uploadFiles(it.id, e.target.files)} data-testid={`check-${it.id}-camera`} />
+                      </label>
+                      {(it.files || []).map((f) => (
+                        <span key={f.file_id} style={{ fontSize: 10, padding: "3px 8px", background: "#dcfce7", color: "#166534", borderRadius: 4, fontFamily: "JetBrains Mono, monospace", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                          {f.name}
+                          <button type="button" onClick={() => removeFile(it.id, f.file_id)} style={{ background: "none", border: "none", cursor: "pointer", color: "#166534", padding: 0, lineHeight: 1 }}><X size={10} /></button>
+                        </span>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             );

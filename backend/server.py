@@ -1928,6 +1928,7 @@ class CheckItemStatus(BaseModel):
     material_id: Optional[str] = None
     status: Literal["ok", "nok"]
     note: str = ""
+    files: List[ExpenseFile] = []
 
 
 class CheckRequest(BaseModel):
@@ -2148,7 +2149,8 @@ async def submit_check(eid: str, payload: CheckRequest, user: dict = Depends(get
             )
             log = IncidentLog(
                 unit_id=it.id, type="report", status="broken",
-                description=desc, files=[],
+                description=desc,
+                files=[{"file_id": f.file_id, "name": f.name, "content_type": f.content_type} for f in (it.files or [])],
             )
             await db.incident_logs.insert_one(log.model_dump())
             incident_count += 1
