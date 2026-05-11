@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { Plus, Trash2, Pencil, Package } from "lucide-react";
+import { Plus, Trash2, Pencil, Package, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -16,6 +16,22 @@ export default function Packs() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: "", description: "", items: [] });
+  const [query, setQuery] = useState("");
+
+  const normalize = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  const filtered = useMemo(() => {
+    const q = normalize(query);
+    if (!q) return packs;
+    return packs.filter((p) => {
+      if (normalize(p.name).includes(q) || normalize(p.description).includes(q)) return true;
+      // also search inside its materials
+      return (p.items || []).some((it) => {
+        const m = materials.find((x) => x.id === it.material_id);
+        return m && (normalize(m.name).includes(q) || normalize(m.reference).includes(q));
+      });
+    });
+  }, [packs, query, materials]);
 
   const load = async () => {
     setPacks((await api.get("/packs")).data);
@@ -52,18 +68,25 @@ export default function Packs() {
   return (
     <div data-testid="packs-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
-        <div><h2 className="page-title">Packs</h2><p className="page-sub">Plantillas de material para aplicar a eventos</p></div>
+        <div><h2 className="page-title">Packs</h2><p className="page-sub">{filtered.length} de {packs.length} · plantillas de material para aplicar a eventos</p></div>
         <Button onClick={startCreate} style={{ background: "var(--accent)" }} data-testid="new-pack-btn"><Plus size={16} /> Nuevo pack</Button>
       </div>
 
-      {packs.length === 0 ? (
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-mute)" }} />
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar pack por nombre, descripción o material que contiene..." style={{ paddingLeft: 36 }} data-testid="packs-search" />
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="card-paper" style={{ textAlign: "center", padding: 60, color: "var(--ink-mute)" }}>
           <Package size={32} style={{ marginBottom: 10, opacity: 0.4 }} /><br />
-          Aún no hay packs. Crea plantillas con material habitual (ej.: "Pack DJ básico") y aplícalos al evento con un clic.
+          {packs.length === 0
+            ? <>Aún no hay packs. Crea plantillas con material habitual (ej.: "Pack DJ básico") y aplícalos al evento con un clic.</>
+            : "Ningún pack coincide con la búsqueda."}
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14 }}>
-          {packs.map((p) => (
+          {filtered.map((p) => (
             <div key={p.id} className="card-paper">
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{p.name}</h3>

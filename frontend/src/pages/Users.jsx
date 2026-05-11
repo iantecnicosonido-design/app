@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import { useAuth, ROLE_LABEL } from "../lib/auth";
-import { Plus, Pencil, Trash2, Key } from "lucide-react";
+import { Plus, Pencil, Trash2, Key, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
+
+const norm = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
 export default function Users() {
   const { user: me } = useAuth();
@@ -16,6 +18,13 @@ export default function Users() {
   const [form, setForm] = useState({ email: "", password: "", name: "", phone: "", role: "tecnico" });
   const [pwdFor, setPwdFor] = useState(null);
   const [newPwd, setNewPwd] = useState("");
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = norm(query);
+    if (!q) return list;
+    return list.filter((u) => [u.name, u.email, u.phone, ROLE_LABEL[u.role] || u.role].some((f) => norm(f).includes(q)));
+  }, [list, query]);
 
   const load = async () => {
     setList((await api.get("/users")).data);
@@ -69,13 +78,22 @@ export default function Users() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 className="page-title">Usuarios</h2>
-          <p className="page-sub">{list.length} usuario(s) · gestiona accesos y roles</p>
+          <p className="page-sub">{filtered.length} de {list.length} usuario(s) · gestiona accesos y roles</p>
         </div>
         <Button onClick={startCreate} style={{ background: "var(--accent)" }} data-testid="new-user-btn"><Plus size={16} /> Nuevo usuario</Button>
       </div>
 
-      <div className="card-paper" style={{ padding: 0, marginTop: 18 }}>
-        {list.map((u) => (
+      <div style={{ position: "relative", marginTop: 18, marginBottom: 0 }}>
+        <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-mute)" }} />
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar usuario por nombre, email, teléfono o rol..." style={{ paddingLeft: 36 }} data-testid="users-search" />
+      </div>
+
+      <div className="card-paper" style={{ padding: 0, marginTop: 14 }}>
+        {filtered.length === 0 ? (
+          <div style={{ padding: 32, textAlign: "center", color: "var(--ink-mute)", fontSize: 13 }}>
+            {list.length === 0 ? "Sin usuarios." : "Ningún usuario coincide con la búsqueda."}
+          </div>
+        ) : filtered.map((u) => (
           <div key={u.id} className="row-hover" style={{ display: "grid", gridTemplateColumns: "1fr 200px 120px 120px 130px", padding: "14px 22px", borderBottom: "1px solid var(--line)", alignItems: "center", gap: 12 }}>
             <div>
               <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>

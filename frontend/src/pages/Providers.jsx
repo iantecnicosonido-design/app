@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { Plus, Trash2, Pencil, Building2 } from "lucide-react";
+import { Plus, Trash2, Pencil, Building2, Search } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -9,17 +9,26 @@ import { toast } from "sonner";
 
 const empty = { name: "", contact: "", phone: "", email: "", notes: "" };
 
+const norm = (s) => (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
 export default function Providers() {
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(empty);
+  const [query, setQuery] = useState("");
 
   const load = async () => {
     const r = await api.get("/providers");
     setItems(r.data);
   };
   useEffect(() => { load(); }, []);
+
+  const filtered = useMemo(() => {
+    const q = norm(query);
+    if (!q) return items;
+    return items.filter((p) => [p.name, p.contact, p.phone, p.email, p.notes].some((f) => norm(f).includes(q)));
+  }, [items, query]);
 
   const submit = async () => {
     if (!form.name.trim()) { toast.error("El nombre es obligatorio"); return; }
@@ -44,21 +53,26 @@ export default function Providers() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h2 className="page-title">Proveedores</h2>
-          <p className="page-sub">Empresas a las que alquilas material</p>
+          <p className="page-sub">{filtered.length} de {items.length} · empresas a las que alquilas material</p>
         </div>
         <Button onClick={() => { setEditing(null); setForm(empty); setOpen(true); }} style={{ background: "var(--accent)" }} data-testid="new-provider-btn">
           <Plus size={16} /> Nuevo proveedor
         </Button>
       </div>
 
-      {items.length === 0 ? (
+      <div style={{ position: "relative", marginBottom: 14 }}>
+        <Search size={14} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--ink-mute)" }} />
+        <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar proveedor por nombre, contacto, teléfono..." style={{ paddingLeft: 36 }} data-testid="providers-search" />
+      </div>
+
+      {filtered.length === 0 ? (
         <div className="card-paper" style={{ textAlign: "center", padding: 60, color: "var(--ink-mute)" }}>
           <Building2 size={32} style={{ marginBottom: 10, opacity: 0.4 }} /><br />
-          Aún no hay proveedores.
+          {items.length === 0 ? "Aún no hay proveedores." : "Ningún proveedor coincide con la búsqueda."}
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
-          {items.map((p) => (
+          {filtered.map((p) => (
             <div key={p.id} className="card-paper" data-testid={`provider-${p.id}`}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                 <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{p.name}</h3>
