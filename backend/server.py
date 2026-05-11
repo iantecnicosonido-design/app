@@ -329,6 +329,8 @@ class Event(BaseModel):
     # Presupuesto y factura del evento (PDF único cada uno, productor only)
     event_budget: Optional[Dict[str, Any]] = None
     event_invoice: Optional[Dict[str, Any]] = None
+    # Entradas extra de contabilidad (ingresos o gastos) introducidas por el productor
+    extra_accounting: List[Dict[str, Any]] = []
     prep_status: Literal["pendiente", "preparado"] = "pendiente"
     prep_checks: List[str] = []  # unit ids marked as prepared by almacen
     prep_locked_at: Optional[str] = None
@@ -995,6 +997,7 @@ def _scrub_invoices(ev: dict, user: dict) -> dict:
         ev["rental_invoices"] = []
         ev["event_budget"] = None
         ev["event_invoice"] = None
+        ev["extra_accounting"] = []
         # tech_notes y tech_functions: solo la suya
         notes = ev.get("tech_notes") or {}
         funcs = ev.get("tech_functions") or {}
@@ -1005,6 +1008,7 @@ def _scrub_invoices(ev: dict, user: dict) -> dict:
         ev["rental_invoices"] = []
         ev["event_budget"] = None
         ev["event_invoice"] = None
+        ev["extra_accounting"] = []
         ev["tech_notes"] = {}
         ev["tech_functions"] = {}
     return ev
@@ -3028,6 +3032,67 @@ async def set_event_invoice(eid: str, payload: SingleFileUpload, user: dict = De
 @api_router.delete("/events/{eid}/invoice")
 async def delete_event_invoice(eid: str, user: dict = Depends(require_role("productor"))):
     await db.events.update_one({"id": eid}, {"$set": {"event_invoice": None}})
+    return {"ok": True}
+
+
+# ---------- Contabilidad: amounts on budget/invoice + extra entries ----------
+class AmountPayload(BaseModel):
+    amount_excl_iva: Optional[float] = None
+    iva_pct: Optional[float] = 21.0
+
+
+@api_router.patch("/events/{eid}/budget-amount")
+async def update_budget_amount(eid: str, payload: AmountPayload, user: dict = Depends(require_role("productor"))):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev or not ev.get("event_budget"):
+        raise HTTPException(404, "No hay presupuesto")
+    upd = {"event_budget.amount_excl_iva": payload.amount_excl_iva,
+           "event_budget.iva_pct": payload.iva_pct}
+    await db.events.update_one({"id": eid}, {"$set": upd})
+    return {"ok": True}
+
+
+@api_router.patch("/events/{eid}/invoice-amount")
+async def update_invoice_amount(eid: str, payload: AmountPayload, user: dict = Depends(require_role("productor"))):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev or not ev.get("event_invoice"):
+        raise HTTPException(404, "No hay factura")
+    upd = {"event_invoice.amount_excl_iva": payload.amount_excl_iva,
+           "event_invoice.iva_pct": payload.iva_pct}
+    await db.events.update_one({"id": eid}, {"$set": upd})
+    return {"ok": True}
+
+
+class ExtraAccountingPayload(BaseModel):
+    kind: Literal["ingreso", "gasto"]
+    concept: str
+    amount_excl_iva: float
+    iva_pct: float = 21.0
+
+
+@api_router.post("/events/{eid}/extra-accounting")
+async def add_extra_accounting(eid: str, payload: ExtraAccountingPayload, user: dict = Depends(require_role("productor"))):
+    if not payload.concept.strip():
+        raise HTTPException(400, "Concepto obligatorio")
+    total = round(payload.amount_excl_iva * (1.0 + (payload.iva_pct or 0) / 100.0), 2)
+    entry = {
+        "id": str(uuid.uuid4()),
+        "kind": payload.kind,
+        "concept": payload.concept.strip(),
+        "amount_excl_iva": round(payload.amount_excl_iva, 2),
+        "iva_pct": round(payload.iva_pct, 2),
+        "total_incl_iva": total,
+        "created_by": user["id"],
+        "created_by_name": user.get("name") or user.get("email", ""),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.events.update_one({"id": eid}, {"$push": {"extra_accounting": entry}})
+    return entry
+
+
+@api_router.delete("/events/{eid}/extra-accounting/{rid}")
+async def remove_extra_accounting(eid: str, rid: str, user: dict = Depends(require_role("productor"))):
+    await db.events.update_one({"id": eid}, {"$pull": {"extra_accounting": {"id": rid}}})
     return {"ok": True}
 
 
