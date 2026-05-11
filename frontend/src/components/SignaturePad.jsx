@@ -17,7 +17,9 @@ export function SignaturePad({ onChange, height = 180, testId = "sig" }) {
     if (ref.current.isEmpty()) {
       onChange && onChange(null);
     } else {
-      onChange && onChange(ref.current.getTrimmedCanvas().toDataURL("image/png"));
+      // Note: avoid getTrimmedCanvas() — incompatible with current webpack/CRA setup
+      // (trim-canvas default-export issue). Use the full canvas instead.
+      onChange && onChange(ref.current.getCanvas().toDataURL("image/png"));
     }
   };
 
