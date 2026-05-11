@@ -318,6 +318,10 @@ class Event(BaseModel):
     tech_invoices: List[Dict[str, Any]] = []
     # Facturas de alquileres (solo productor las sube/ve)
     rental_invoices: List[Dict[str, Any]] = []
+    # Contactos del bolo (solo bolos): nombre, rol, teléfono
+    contacts: List[Dict[str, Any]] = []
+    # Documentos del bolo (solo bolos): hoja_ruta | rider | contrarider | implantacion | otros
+    documents: List[Dict[str, Any]] = []
     prep_status: Literal["pendiente", "preparado"] = "pendiente"
     prep_checks: List[str] = []  # unit ids marked as prepared by almacen
     prep_locked_at: Optional[str] = None
@@ -2941,6 +2945,101 @@ async def delete_rental_invoice(eid: str, iid: str, user: dict = Depends(require
         raise HTTPException(404, "Event not found")
     await db.events.update_one({"id": eid}, {"$pull": {"rental_invoices": {"id": iid}}})
     return {"ok": True}
+
+
+
+# ---------- Contacts (bolos only) ----------
+class ContactPayload(BaseModel):
+    name: str
+    role: str = ""
+    phone: str = ""
+    email: str = ""
+
+
+def _ensure_bolo(ev: dict):
+    if ev.get("type") != "bolo":
+        raise HTTPException(400, "Solo disponible en bolos")
+
+
+@api_router.post("/events/{eid}/contacts")
+async def add_contact(eid: str, payload: ContactPayload, user: dict = Depends(require_role("productor"))):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    _ensure_bolo(ev)
+    if not payload.name.strip():
+        raise HTTPException(400, "Nombre obligatorio")
+    contact = {
+        "id": str(uuid.uuid4()),
+        "name": payload.name.strip(),
+        "role": payload.role.strip(),
+        "phone": payload.phone.strip(),
+        "email": payload.email.strip(),
+    }
+    await db.events.update_one({"id": eid}, {"$push": {"contacts": contact}})
+    return contact
+
+
+@api_router.put("/events/{eid}/contacts/{cid}")
+async def update_contact(eid: str, cid: str, payload: ContactPayload, user: dict = Depends(require_role("productor"))):
+    if not payload.name.strip():
+        raise HTTPException(400, "Nombre obligatorio")
+    r = await db.events.update_one(
+        {"id": eid, "contacts.id": cid},
+        {"$set": {
+            "contacts.$.name": payload.name.strip(),
+            "contacts.$.role": payload.role.strip(),
+            "contacts.$.phone": payload.phone.strip(),
+            "contacts.$.email": payload.email.strip(),
+        }},
+    )
+    if r.matched_count == 0:
+        raise HTTPException(404, "Contacto no encontrado")
+    return {"ok": True}
+
+
+@api_router.delete("/events/{eid}/contacts/{cid}")
+async def delete_contact(eid: str, cid: str, user: dict = Depends(require_role("productor"))):
+    await db.events.update_one({"id": eid}, {"$pull": {"contacts": {"id": cid}}})
+    return {"ok": True}
+
+
+# ---------- Documents (bolos only) ----------
+DOC_CATEGORIES = {"hoja_ruta", "rider", "contrarider", "implantacion", "otros"}
+
+
+class DocumentCreate(BaseModel):
+    category: str
+    file: ExpenseFile
+    notes: str = ""
+
+
+@api_router.post("/events/{eid}/documents")
+async def add_document(eid: str, payload: DocumentCreate, user: dict = Depends(require_role("productor"))):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    _ensure_bolo(ev)
+    if payload.category not in DOC_CATEGORIES:
+        raise HTTPException(400, "Categoría inválida")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "category": payload.category,
+        "file": payload.file.model_dump(),
+        "notes": payload.notes,
+        "uploaded_by": user["id"],
+        "uploaded_by_name": user.get("name") or user.get("email", ""),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.events.update_one({"id": eid}, {"$push": {"documents": doc}})
+    return doc
+
+
+@api_router.delete("/events/{eid}/documents/{did}")
+async def delete_document(eid: str, did: str, user: dict = Depends(require_role("productor"))):
+    await db.events.update_one({"id": eid}, {"$pull": {"documents": {"id": did}}})
+    return {"ok": True}
+
 
 
 

@@ -13,6 +13,7 @@ import { ReturnDialog } from "../components/ReturnDialog";
 import { CheckDialog } from "../components/CheckDialog";
 import DuplicateMaterialDialog from "../components/DuplicateMaterialDialog";
 import InvoicesSection from "../components/InvoicesSection";
+import { ContactsSection, DocumentsSection } from "../components/EventBoloSections";
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
@@ -727,6 +728,14 @@ export default function EventDetail() {
           </div>
         ))}
       </div>
+
+      {/* Bolo only: Contacts + Documents */}
+      {ev.type === "bolo" && (
+        <>
+          <ContactsSection event={ev} canEdit={canEditFicha && !isClosed} onChanged={load} />
+          <DocumentsSection event={ev} canEdit={canEditFicha && !isClosed} onChanged={load} />
+        </>
+      )}
 
       {/* Expenses (bolo only) */}
       {ev.type === "bolo" && (user?.role === "productor" || (user?.role === "tecnico" && ev.responsible_technician_id === user.id)) && (

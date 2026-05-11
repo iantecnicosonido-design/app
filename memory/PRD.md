@@ -125,6 +125,12 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
     - almacen/taller: no ve ninguna factura
   - Frontend: nuevo componente `InvoicesSection` montado en EventDetail. Para tec autónomo asignado: form de upload + lista de su factura. Para productor: ambas secciones completas con uploader, importe €, proveedor (en alquileres), notas, abrir y eliminar.
 
+- ✅ **Contactos y documentación en bolos (Feb 2026)**:
+  - Solo en eventos `type=bolo` (rechazado 400 para alquileres).
+  - **Contactos**: `Event.contacts: List` con `{id, name, role, phone, email}`. Endpoints POST/PUT/DELETE `/events/{eid}/contacts[/{cid}]` (productor). UI: lista de cards en EventDetail con phone clickable, email clickable, editar y eliminar.
+  - **Documentación**: `Event.documents: List` con `{id, category, file, notes, uploaded_by, uploaded_at}`. Categorías: `hoja_ruta | rider | contrarider | implantacion | otros`. Endpoints POST `/events/{eid}/documents` (productor) y DELETE `/events/{eid}/documents/{did}` (productor). UI: lista agrupada por categoría con botón "Abrir" y eliminar. Visible para todos los roles con acceso al evento.
+  - Componente: `/app/frontend/src/components/EventBoloSections.jsx` exporta `ContactsSection` y `DocumentsSection`.
+
 ## Backlog
 ### P1
 - Favicon (convertir `/app/frontend/public/logo.png` a 32x32 favicon.ico)
