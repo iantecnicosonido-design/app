@@ -28,6 +28,7 @@ from auth import (
     decode_token, set_auth_cookies, clear_auth_cookies, make_auth_dependencies,
     gen_reset_token,
 )
+from emailer import send_email, render_basic
 import jwt as _jwt
 
 
@@ -842,9 +843,39 @@ async def update_event(eid: str, payload: EventUpdate, _u: dict = Depends(requir
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
-    res = await db.events.find_one_and_update({"id": eid}, {"$set": update}, return_document=True, projection=PROJ)
-    if not res:
+    prev = await db.events.find_one({"id": eid}, PROJ)
+    if not prev:
         raise HTTPException(404, "Event not found")
+    res = await db.events.find_one_and_update({"id": eid}, {"$set": update}, return_document=True, projection=PROJ)
+    # notify newly-assigned technicians
+    try:
+        prev_set = set(prev.get("assigned_technicians") or [])
+        new_set = set(res.get("assigned_technicians") or [])
+        added = new_set - prev_set
+        if added:
+            for tid in added:
+                tech = await db.users.find_one({"id": tid, "active": True}, PROJ)
+                if not tech:
+                    continue
+                public_url = os.environ.get("APP_PUBLIC_URL", "")
+                ev_url = f"{public_url}/eventos/{eid}"
+                date_str = res.get("event_date") or res.get("setup_date") or ""
+                body = (f"Hola {tech.get('name') or tech['email']}, has sido asignado al evento "
+                        f"<b>{res.get('name','')}</b>.<br><br>"
+                        f"<b>Fecha:</b> {date_str}<br>"
+                        f"<b>Ubicación:</b> {res.get('location') or '—'}<br>"
+                        f"<b>Cliente:</b> {res.get('client_name') or '—'}<br>"
+                        f"<b>Horarios:</b> {res.get('schedule') or '—'}")
+                html = render_basic(
+                    title="Te han asignado a un evento",
+                    body_html=body,
+                    cta_label="Ver detalles",
+                    cta_url=ev_url,
+                    footer="Stock Eventos · Edison Bryan",
+                )
+                await send_email(tech["email"], f"Asignación: {res.get('name','evento')}", html)
+    except Exception as e:
+        logger.error("technician notify error: %s", e)
     return res
 
 
@@ -1838,8 +1869,21 @@ async def forgot_password(payload: ForgotPasswordRequest):
             "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
             "used": False,
         })
-        # TODO: integrate Resend later
+        reset_url = f"{os.environ.get('APP_PUBLIC_URL', '')}/reset-password?token={tok}"
         logger.info(f"[PASSWORD RESET] {email} → token: {tok}")
+        try:
+            html = render_basic(
+                title="Restablecer contraseña",
+                body_html=(f"Hola {user.get('name') or ''}, hemos recibido una solicitud para "
+                           "restablecer tu contraseña. Si has sido tú, pulsa el botón para "
+                           "elegir una nueva. El enlace caduca en 1 hora."),
+                cta_label="Restablecer contraseña",
+                cta_url=reset_url,
+                footer="Si no has solicitado este cambio, ignora este mensaje. Stock Eventos · Edison Bryan",
+            )
+            await send_email(email, "Restablecer contraseña · Stock Eventos", html)
+        except Exception as e:
+            logger.error("forgot_password email error: %s", e)
     return {"ok": True}
 
 
@@ -1891,6 +1935,23 @@ async def create_user(payload: RegisterRequest, user: dict = Depends(require_rol
     u = User(email=email, password_hash=hash_password(payload.password),
              name=payload.name.strip(), role=payload.role)
     await db.users.insert_one(u.model_dump())
+    # welcome email with initial password
+    try:
+        public_url = os.environ.get("APP_PUBLIC_URL", "")
+        html = render_basic(
+            title="Bienvenido a Stock Eventos",
+            body_html=(f"Hola {u.name or u.email}, se te ha creado una cuenta como "
+                       f"<b>{u.role}</b> en Stock Eventos.<br><br>"
+                       f"<b>Email:</b> {u.email}<br>"
+                       f"<b>Contraseña temporal:</b> <code>{payload.password}</code><br><br>"
+                       "Cámbiala desde tu perfil después del primer acceso."),
+            cta_label="Acceder",
+            cta_url=f"{public_url}/login",
+            footer="Stock Eventos · Edison Bryan",
+        )
+        await send_email(u.email, "Tu acceso a Stock Eventos", html)
+    except Exception as e:
+        logger.error("welcome email error: %s", e)
     return _public_user(u.model_dump())
 
 
