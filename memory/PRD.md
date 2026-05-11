@@ -90,6 +90,7 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Todos los endpoints de edición de material/vehículos/alquileres del evento pasan `user`
   - Todos los endpoints de preparación (`prep/check-unit`, `prep/check-batch`, `prep/substitute`, `prep/remove-unit`, `prep/lock`) llaman a `_assert_ready_for_prep(ev)` → 423 si productor no ha marcado listo
   - Al marcar listo: notifica a todos los almacén activos con link `/eventos/{eid}/preparacion`
+  - **Al bloquear preparación (`prep/lock`)**: notifica a todos los productores activos ("Almacén ha terminado la preparación, listo para salir nave")
   - Productor puede desmarcar SOLO si almacén aún no ha bloqueado (`prep_status="pendiente"`)
   - Frontend: botón verde "🔒 Listo para preparar" (productor) → cambia a outline "🔓 Desbloquear edición" cuando ya está marcado. Botón "Preparar" deshabilitado para almacén hasta que esté marcado (tooltip "Esperando productor"). Banner amarillo con estado claro y texto explicativo según rol.
 

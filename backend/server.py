@@ -1675,6 +1675,12 @@ async def prep_lock(eid: str, user: dict = Depends(require_almacen)):
         "prep_locked_by_name": user.get("name") or user.get("email", ""),
         "prep_log": log,
     }})
+    # Notificar a productores: bolo listo para salir nave
+    link = f"/eventos/{eid}"
+    title = f"Preparado: {ev.get('name','')}"
+    msg = (f"Almacén ha terminado la preparación de <b>{ev.get('name','')}</b>. "
+           f"El material está listo para salir nave.")
+    await _notify_productores("prep_locked", title, msg, link)
     return await db.events.find_one({"id": eid}, PROJ)
 
 
