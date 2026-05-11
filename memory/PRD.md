@@ -38,6 +38,8 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Checkboxes "marcar todas" a nivel material y a nivel flightcase
   - Sustitución cruzada de material (buscador global de almacén, no solo misma referencia)
   - Botón "Preparar" en cabecera de evento; lock/unlock por Almacén; estado read-only para resto de roles
+  - Botón "Marcar todo" (marca todas las unidades como preparadas de golpe) y "Imprimir hoja" (PDF dedicado con casillas vacías para tachar a mano)
+  - Nuevo endpoint `GET /events/{eid}/export-prep` genera el PDF de preparación con bloque de firma
 - ✅ Tests automatizados pasados (24/24 backend, 7/7 frontend)
 
 ## Backlog

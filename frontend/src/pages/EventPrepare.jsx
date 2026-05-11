@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { api } from "../lib/api";
-import { ArrowLeft, Lock, Unlock, Search, Trash2, RefreshCw, Package, CheckCheck } from "lucide-react";
+import { api, API } from "../lib/api";
+import { ArrowLeft, Lock, Unlock, Search, Trash2, RefreshCw, Package, CheckCheck, FileDown, CheckSquare } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -143,6 +143,35 @@ export default function EventPrepare() {
     } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
   };
 
+  const markAll = async () => {
+    if (!canEdit || isPrepLocked) return;
+    const allIds = (ev?.materials || []).flatMap((m) => (m.units || []).map((u) => u.unit_id));
+    const pending = allIds.filter((uid) => !prepChecks.has(uid));
+    if (pending.length === 0) { toast.info("Ya está todo marcado"); return; }
+    if (!window.confirm(`¿Marcar como preparadas las ${pending.length} unidades restantes?`)) return;
+    try {
+      const r = await api.post(`/events/${id}/prep/check-batch`, { unit_ids: pending, checked: true });
+      setEv(r.data); toast.success(`${pending.length} unidades marcadas`);
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const downloadPrepPDF = () => {
+    const token = localStorage.getItem("auth_token");
+    const url = `${API}/events/${id}/export-prep`;
+    // Use fetch with auth header → blob → trigger download (axios baseURL not needed; we want raw fetch for blob)
+    fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {}, credentials: "include" })
+      .then((r) => { if (!r.ok) throw new Error("Error " + r.status); return r.blob(); })
+      .then((blob) => {
+        const a = document.createElement("a");
+        const objUrl = URL.createObjectURL(blob);
+        a.href = objUrl;
+        a.download = `preparacion_${(ev.reference || ev.name || "evento").replace(/\s+/g, "_")}.pdf`;
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(objUrl);
+      })
+      .catch(() => toast.error("Error descargando PDF"));
+  };
+
   // ---------- Render helpers ----------
   if (loading || !ev) {
     return <div style={{ padding: 40, color: "var(--ink-mute)" }}>Cargando…</div>;
@@ -210,7 +239,17 @@ export default function EventPrepare() {
               {checkedCount}/{totalUnits} unidades
             </span>
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {(isAlmacen || isProductor) && (
+              <Button variant="outline" onClick={downloadPrepPDF} data-testid="prep-pdf-btn" title="Imprimir hoja para tachar a mano">
+                <FileDown size={14} /> Imprimir hoja
+              </Button>
+            )}
+            {canEdit && !isClosed && !isPrepLocked && totalUnits > 0 && checkedCount < totalUnits && (
+              <Button variant="outline" onClick={markAll} data-testid="prep-mark-all-btn" title="Marcar todas las unidades como preparadas">
+                <CheckSquare size={14} /> Marcar todo
+              </Button>
+            )}
             {canEdit && !isClosed && !isPrepLocked && totalUnits > 0 && (
               <Button
                 onClick={lockPrep}

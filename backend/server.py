@@ -1996,6 +1996,205 @@ def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
     return buf.getvalue()
 
 
+def _build_prep_pdf(event: dict, cat_meta: dict) -> bytes:
+    """PDF de hoja de preparación con casillas vacías para tachar a mano."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4, leftMargin=1.6 * cm, rightMargin=1.6 * cm,
+        topMargin=1.2 * cm, bottomMargin=1.6 * cm,
+        title=f"Preparación {event.get('name','')}",
+    )
+    styles = getSampleStyleSheet()
+    body = styles["Normal"]
+    h_cat = ParagraphStyle("hcat", parent=body, fontSize=12, textColor=colors.HexColor("#111827"),
+                           spaceBefore=10, spaceAfter=4, fontName="Helvetica-Bold")
+    h_mat = ParagraphStyle("hmat", parent=body, fontSize=10, fontName="Helvetica-Bold", spaceBefore=4, spaceAfter=2)
+    h_fc = ParagraphStyle("hfc", parent=body, fontSize=10, fontName="Helvetica-Bold",
+                          textColor=colors.HexColor("#3730a3"), spaceBefore=6, spaceAfter=2, leftIndent=4)
+    unit_style = ParagraphStyle("unit", parent=body, fontSize=10, leftIndent=10)
+    story = []
+
+    if LOGO_PATH.exists():
+        try:
+            ir = ImageReader(str(LOGO_PATH))
+            iw, ih = ir.getSize()
+            target_w = 3.5 * cm
+            target_h = target_w * (ih / iw)
+            if target_h > 1.6 * cm:
+                target_h = 1.6 * cm
+                target_w = target_h * (iw / ih)
+            logo = Image(str(LOGO_PATH), width=target_w, height=target_h)
+            logo.hAlign = "LEFT"
+            type_label = "BOLO" if event.get("type") == "bolo" else "ALQUILER"
+            extras = ""
+            if event.get('client_name'):
+                extras += f" · {event.get('client_name')}"
+            if event.get('reference'):
+                extras += f" · Ref. {event.get('reference')}"
+            head_right = Paragraph(
+                f"<b>HOJA DE PREPARACIÓN</b><br/><font size=14>{event.get('name','Evento')}</font><br/>"
+                f"<font size=9 color='#78716c'>{type_label}{extras}</font>",
+                ParagraphStyle("hr", parent=body, fontSize=10, alignment=2),
+            )
+            head_tbl = Table([[logo, head_right]], colWidths=[4 * cm, 13.5 * cm])
+            head_tbl.setStyle(TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor("#1c1917")),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]))
+            story.append(head_tbl)
+            story.append(Spacer(1, 8))
+        except Exception:
+            pass
+
+    meta_rows = []
+    if event.get("location"):
+        meta_rows.append(["Ubicación", event["location"]])
+    if event.get("type") == "bolo":
+        if event.get("warehouse_out_dt"):
+            meta_rows.append(["Salida nave", _fmt_dt(event.get("warehouse_out_dt"))])
+        if event.get("return_dt"):
+            meta_rows.append(["Devolución", _fmt_dt(event.get("return_dt"))])
+    else:
+        if event.get("setup_date"):
+            meta_rows.append(["Fecha montaje", _fmt_dt(event.get("setup_date"))])
+        if event.get("event_date"):
+            meta_rows.append(["Fecha acto", _fmt_dt(event.get("event_date"))])
+    if meta_rows:
+        mt = Table(meta_rows, colWidths=[3.5 * cm, 14 * cm])
+        mt.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, -1), "Helvetica", 9),
+            ("FONT", (0, 0), (0, -1), "Helvetica-Bold", 9),
+            ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#78716c")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
+        ]))
+        story.append(mt)
+        story.append(Spacer(1, 10))
+
+    story.append(Paragraph(
+        "<b>MATERIAL A PREPARAR</b>",
+        ParagraphStyle("ttl", parent=body, fontSize=11, textColor=colors.HexColor("#b45309"),
+                       fontName="Helvetica-Bold", spaceAfter=2),
+    ))
+    story.append(Spacer(1, 4))
+
+    CHECK_W = 0.55 * cm
+
+    def _row(label_para):
+        row = Table([["", label_para]], colWidths=[CHECK_W, 17.2 * cm - CHECK_W])
+        row.setStyle(TableStyle([
+            ("BOX", (0, 0), (0, 0), 0.6, colors.HexColor("#1c1917")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (1, 0), (1, 0), 6),
+            ("LEFTPADDING", (0, 0), (0, 0), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]))
+        return row
+
+    materials = event.get("materials", [])
+    by_cat: Dict[str, List[dict]] = {}
+    for m in materials:
+        by_cat.setdefault(m["category"], []).append(m)
+
+    cat_order = cat_meta.get("__cat_order__") or list(by_cat.keys())
+    for cat in cat_order:
+        if cat not in by_cat:
+            continue
+        cat_label = cat_meta.get(f"__cat_label__{cat}", cat.capitalize())
+        cat_unit_refs = cat_meta.get(f"__cat_unit_refs__{cat}", True)
+        story.append(Paragraph(cat_label.upper(), h_cat))
+
+        if cat_unit_refs:
+            for m in sorted(by_cat[cat], key=lambda x: x.get("reference") or x["name"]):
+                units = m.get("units", [])
+                ref_pfx = f"{m.get('reference','')} · " if m.get("reference") else ""
+                story.append(Paragraph(
+                    f"{ref_pfx}{m['name']} <font color='#78716c'>×{len(units)}</font>",
+                    h_mat,
+                ))
+                for u in units:
+                    label = Paragraph(
+                        f"<font face='Courier' size=9 color='#b45309'>{u['reference']}</font>",
+                        unit_style,
+                    )
+                    story.append(_row(label))
+        else:
+            fc_groups: Dict[str, Dict[str, dict]] = {}
+            for m in by_cat[cat]:
+                for u in m.get("units", []):
+                    fc = u.get("flightcase") or ""
+                    mat_key = m.get("reference") or m["name"]
+                    fc_groups.setdefault(fc, {}).setdefault(mat_key, {
+                        "name": m["name"], "reference": m.get("reference", ""), "qty": 0,
+                    })
+                    fc_groups[fc][mat_key]["qty"] += 1
+            fc_keys = sorted(fc_groups.keys(), key=lambda x: (x == "", x))
+            for fc_name in fc_keys:
+                fc_label = fc_name if fc_name else "Sin flightcase"
+                story.append(Paragraph(fc_label, h_fc))
+                for mat_key in sorted(fc_groups[fc_name].keys()):
+                    mm = fc_groups[fc_name][mat_key]
+                    ref_pfx = f"{mm['reference']} · " if mm["reference"] else ""
+                    label = Paragraph(
+                        f"{ref_pfx}{mm['name']} <font color='#78716c'>×{mm['qty']}</font>",
+                        unit_style,
+                    )
+                    story.append(_row(label))
+
+    rentals = event.get("rentals", [])
+    if rentals:
+        story.append(Paragraph("ALQUILER EXTERNO", h_cat))
+        for r in rentals:
+            extra = f" · {r.get('provider_name')}" if r.get("provider_name") else ""
+            label = Paragraph(
+                f"{r['name']} <font color='#78716c'>×{r['quantity']}{extra}</font>",
+                unit_style,
+            )
+            story.append(_row(label))
+
+    story.append(Spacer(1, 16))
+    sig = Table(
+        [["Preparado por", "Fecha y firma"], ["", ""]],
+        colWidths=[8 * cm, 8 * cm], rowHeights=[0.6 * cm, 1.8 * cm],
+    )
+    sig.setStyle(TableStyle([
+        ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 9),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#78716c")),
+        ("BOX", (0, 1), (0, 1), 0.5, colors.HexColor("#1c1917")),
+        ("BOX", (1, 1), (1, 1), 0.5, colors.HexColor("#1c1917")),
+    ]))
+    story.append(sig)
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        f"Generado el {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')} · Edison Rent · Hoja interna",
+        ParagraphStyle("foot", parent=body, fontSize=8, textColor=colors.HexColor("#9ca3af")),
+    ))
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+@api_router.get("/events/{eid}/export-prep")
+async def export_prep_pdf(eid: str, user: dict = Depends(get_current_user)):
+    if user.get("role") not in ("productor", "almacen"):
+        raise HTTPException(403, "Sin permiso para descargar la hoja de preparación")
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    cats = await db.categories.find({}, PROJ).sort("order", 1).to_list(200)
+    cat_meta = {"__cat_order__": [c["key"] for c in cats]}
+    for c in cats:
+        cat_meta[f"__cat_label__{c['key']}"] = c["label"]
+        cat_meta[f"__cat_unit_refs__{c['key']}"] = c.get("has_unit_refs", True)
+    pdf_bytes = _build_prep_pdf(ev, cat_meta)
+    filename = f"preparacion_{(ev.get('reference') or ev.get('name','evento')).replace(' ', '_')}.pdf"
+    return StreamingResponse(io.BytesIO(pdf_bytes), media_type="application/pdf",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @api_router.get("/events/{eid}/export")
 async def export_event_pdf(eid: str, user: dict = Depends(get_current_user)):
     ev = await db.events.find_one({"id": eid}, PROJ)
