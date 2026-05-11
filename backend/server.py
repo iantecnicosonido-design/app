@@ -1724,7 +1724,14 @@ async def create_incident(payload: IncidentCreate, user: dict = Depends(get_curr
                 for unit in em.get("units", []):
                     if unit["unit_id"] == payload.unit_id:
                         raise HTTPException(400, "Unidad bloqueada en evento. Libera primero.")
-        await db.units.update_one({"id": payload.unit_id}, {"$set": {"status": payload.status}})
+        await db.units.update_one(
+            {"id": payload.unit_id},
+            {"$set": {
+                "status": payload.status,
+                "incident_opened_at": datetime.now(timezone.utc).isoformat(),
+                "urgent": False,
+            }},
+        )
         log = IncidentLog(unit_id=payload.unit_id, type="report", status=payload.status,
                           description=payload.description, files=payload.files)
     else:
@@ -1736,7 +1743,14 @@ async def create_incident(payload: IncidentCreate, user: dict = Depends(get_curr
             for ovh in ev.get("vehicles", []):
                 if ovh.get("type") == "owned" and ovh.get("vehicle_id") == payload.vehicle_id:
                     raise HTTPException(400, f"Vehículo asignado al evento '{ev.get('name','')}'. Quítalo primero.")
-        await db.vehicles.update_one({"id": payload.vehicle_id}, {"$set": {"status": payload.status}})
+        await db.vehicles.update_one(
+            {"id": payload.vehicle_id},
+            {"$set": {
+                "status": payload.status,
+                "incident_opened_at": datetime.now(timezone.utc).isoformat(),
+                "urgent": False,
+            }},
+        )
         log = IncidentLog(vehicle_id=payload.vehicle_id, type="report", status=payload.status,
                           description=payload.description, files=payload.files)
     await db.incident_logs.insert_one(log.model_dump())
@@ -1745,26 +1759,46 @@ async def create_incident(payload: IncidentCreate, user: dict = Depends(get_curr
 
 @api_router.get("/incidents")
 async def list_incidents(user: dict = Depends(get_current_user)):
-    """Returns units + vehicles currently in broken/repair status, with their latest log."""
+    """Returns units + vehicles currently in broken/repair status, with their latest log.
+    Sorted: urgentes primero, luego por antigüedad de apertura (más antiguos arriba)."""
     out = []
     units = await db.units.find({"status": {"$in": ["broken", "repair"]}}, PROJ).to_list(2000)
     for u in units:
         m = await db.materials.find_one({"id": u["material_id"]}, PROJ)
         latest = await db.incident_logs.find({"unit_id": u["id"]}, PROJ).sort("created_at", -1).to_list(1)
+        # backfill: if legacy unit has no incident_opened_at, use latest report log time
+        if not u.get("incident_opened_at"):
+            rep = await db.incident_logs.find({"unit_id": u["id"], "type": "report"}, PROJ).sort("created_at", -1).to_list(1)
+            opened_at = rep[0]["created_at"] if rep else (latest[0]["created_at"] if latest else None)
+            if opened_at:
+                u["incident_opened_at"] = opened_at
+                await db.units.update_one({"id": u["id"]}, {"$set": {"incident_opened_at": opened_at}})
         out.append({
             "kind": "unit",
             "unit": u,
             "material": {"id": m["id"], "name": m["name"], "category": m["category"], "reference": m["reference"]} if m else None,
             "latest": latest[0] if latest else None,
+            "urgent": bool(u.get("urgent", False)),
+            "opened_at": u.get("incident_opened_at"),
         })
     vehicles = await db.vehicles.find({"status": {"$in": ["broken", "repair"]}}, PROJ).to_list(500)
     for v in vehicles:
         latest = await db.incident_logs.find({"vehicle_id": v["id"]}, PROJ).sort("created_at", -1).to_list(1)
+        if not v.get("incident_opened_at"):
+            rep = await db.incident_logs.find({"vehicle_id": v["id"], "type": "report"}, PROJ).sort("created_at", -1).to_list(1)
+            opened_at = rep[0]["created_at"] if rep else (latest[0]["created_at"] if latest else None)
+            if opened_at:
+                v["incident_opened_at"] = opened_at
+                await db.vehicles.update_one({"id": v["id"]}, {"$set": {"incident_opened_at": opened_at}})
         out.append({
             "kind": "vehicle",
             "vehicle": v,
             "latest": latest[0] if latest else None,
+            "urgent": bool(v.get("urgent", False)),
+            "opened_at": v.get("incident_opened_at"),
         })
+    # urgentes primero, luego más antiguos primero
+    out.sort(key=lambda x: (0 if x["urgent"] else 1, x.get("opened_at") or ""))
     return out
 
 
@@ -1834,7 +1868,11 @@ async def resolve_incident(unit_id: str, payload: IncidentResolve, _u: dict = De
     u = await db.units.find_one({"id": unit_id}, PROJ)
     if not u:
         raise HTTPException(404, "Unit not found")
-    await db.units.update_one({"id": unit_id}, {"$set": {"status": "available"}})
+    await db.units.update_one(
+        {"id": unit_id},
+        {"$set": {"status": "available"},
+         "$unset": {"incident_opened_at": "", "urgent": ""}},
+    )
     log = IncidentLog(
         unit_id=unit_id, type="resolve", status="available",
         description=payload.description, files=payload.files,
@@ -1848,13 +1886,41 @@ async def resolve_vehicle_incident(vid: str, payload: IncidentResolve, _u: dict 
     v = await db.vehicles.find_one({"id": vid}, PROJ)
     if not v:
         raise HTTPException(404, "Vehicle not found")
-    await db.vehicles.update_one({"id": vid}, {"$set": {"status": "available"}})
+    await db.vehicles.update_one(
+        {"id": vid},
+        {"$set": {"status": "available"},
+         "$unset": {"incident_opened_at": "", "urgent": ""}},
+    )
     log = IncidentLog(
         vehicle_id=vid, type="resolve", status="available",
         description=payload.description, files=payload.files,
     )
     await db.incident_logs.insert_one(log.model_dump())
     return log
+
+
+@api_router.post("/incidents/{unit_id}/urgent")
+async def set_unit_urgent(unit_id: str, payload: dict, _u: dict = Depends(require_productor)):
+    u = await db.units.find_one({"id": unit_id}, PROJ)
+    if not u:
+        raise HTTPException(404, "Unit not found")
+    if u.get("status") not in ("broken", "repair"):
+        raise HTTPException(400, "La unidad no tiene incidencia activa")
+    urgent = bool(payload.get("urgent", True))
+    await db.units.update_one({"id": unit_id}, {"$set": {"urgent": urgent}})
+    return {"ok": True, "urgent": urgent}
+
+
+@api_router.post("/vehicle-incidents/{vid}/urgent")
+async def set_vehicle_urgent(vid: str, payload: dict, _u: dict = Depends(require_productor)):
+    v = await db.vehicles.find_one({"id": vid}, PROJ)
+    if not v:
+        raise HTTPException(404, "Vehicle not found")
+    if v.get("status") not in ("broken", "repair"):
+        raise HTTPException(400, "El vehículo no tiene incidencia activa")
+    urgent = bool(payload.get("urgent", True))
+    await db.vehicles.update_one({"id": vid}, {"$set": {"urgent": urgent}})
+    return {"ok": True, "urgent": urgent}
 
 
 @api_router.post("/incidents/{unit_id}/update")

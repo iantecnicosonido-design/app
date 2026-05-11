@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, API } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { Plus, Wrench, FileText, Image as ImgIcon, X, Filter } from "lucide-react";
+import { Plus, Wrench, FileText, Image as ImgIcon, X, Filter, Flame, AlertTriangle } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -20,6 +20,7 @@ const TYPE_LABELS = {
 export default function Incidents() {
   const { user } = useAuth();
   const canResolve = user?.role === "taller";
+  const canMarkUrgent = user?.role === "productor";
   const [params, setParams] = useSearchParams();
   const initialMaterial = params.get("material_id") || "";
   const initialUnit = params.get("unit_id") || "";
@@ -129,6 +130,20 @@ export default function Incidents() {
     } catch { toast.error("Error"); }
   };
 
+  const toggleUrgent = async (item) => {
+    const isVeh = item.kind === "vehicle";
+    const next = !item.urgent;
+    try {
+      if (isVeh) {
+        await api.post(`/vehicle-incidents/${item.vehicle.id}/urgent`, { urgent: next });
+      } else {
+        await api.post(`/incidents/${item.unit.id}/urgent`, { urgent: next });
+      }
+      toast.success(next ? "Marcada como urgente" : "Urgencia retirada");
+      loadActive();
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
   const availableUnits = units.filter((u) => u.status === "available");
   const availableVehicles = vehicles.filter((v) => v.status === "available");
 
@@ -141,13 +156,17 @@ export default function Incidents() {
 
   const totalReports = logs.filter((l) => l.type === "report").length;
   const totalResolves = logs.filter((l) => l.type === "resolve").length;
+  const urgentCount = list.filter((x) => x.urgent).length;
 
   return (
     <div data-testid="incidents-page">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h2 className="page-title">Incidencias</h2>
-          <p className="page-sub">{list.length} unidades activas en avería o reparación</p>
+          <h2 className="page-title">{user?.role === "taller" ? "Cola de trabajo · Taller" : "Incidencias"}</h2>
+          <p className="page-sub">
+            {list.length} activa(s)
+            {urgentCount > 0 && <> · <b style={{ color: "var(--bad)" }}>{urgentCount} urgente{urgentCount === 1 ? "" : "s"}</b></>}
+          </p>
         </div>
         <Button onClick={() => setOpenNew(true)} style={{ background: "var(--accent)" }} data-testid="new-incident-btn"><Plus size={16} /> Reportar avería</Button>
       </div>
@@ -171,8 +190,29 @@ export default function Incidents() {
               const name = isVeh ? it.vehicle.name : (it.material?.name || "—");
               const status = isVeh ? it.vehicle.status : it.unit.status;
               const key = isVeh ? `v-${it.vehicle.id}` : `u-${it.unit.id}`;
+              const urgent = !!it.urgent;
+              const openedAt = it.opened_at;
               return (
-                <div key={key} className="card-paper" style={{ display: "grid", gridTemplateColumns: "120px 1fr 130px 120px 110px", gap: 14, alignItems: "center" }}>
+                <div
+                  key={key}
+                  className="card-paper"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "auto 120px 1fr 130px 130px 110px 110px",
+                    gap: 14,
+                    alignItems: "center",
+                    borderLeft: urgent ? "4px solid var(--bad)" : "4px solid transparent",
+                    background: urgent ? "#fff7f5" : undefined,
+                  }}
+                  data-testid={`incident-row-${key}`}
+                >
+                  {urgent ? (
+                    <span title="Urgente" style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "3px 8px", background: "var(--bad)", color: "#fff", borderRadius: 999, fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "JetBrains Mono, monospace" }}>
+                      <Flame size={11} /> URGENTE
+                    </span>
+                  ) : (
+                    <span style={{ width: 1 }} />
+                  )}
                   <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>{ref}</span>
                   <div>
                     <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
@@ -182,7 +222,24 @@ export default function Incidents() {
                     {it.latest && <div style={{ fontSize: 12, color: "var(--ink-mute)", marginTop: 4 }}>{it.latest.description}</div>}
                   </div>
                   <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: status === "broken" ? "#fee2e2" : "#fef3c7", color: status === "broken" ? "#991b1b" : "#92400e", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>{status === "broken" ? "AVERIADO" : "REPARACIÓN"}</span>
-                  <Button size="sm" variant="outline" onClick={() => showHistory(it)}>Histórico</Button>
+                  <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)", textAlign: "center" }} title={openedAt ? new Date(openedAt).toLocaleString("es-ES") : ""}>
+                    {openedAt ? `hace ${daysAgo(openedAt)}` : "—"}
+                  </span>
+                  <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                    <Button size="sm" variant="outline" onClick={() => showHistory(it)}>Histórico</Button>
+                    {canMarkUrgent && (
+                      <Button
+                        size="sm"
+                        variant={urgent ? "default" : "outline"}
+                        onClick={() => toggleUrgent(it)}
+                        title={urgent ? "Quitar urgencia" : "Marcar urgente"}
+                        style={urgent ? { background: "var(--bad)" } : { color: "var(--bad)", borderColor: "var(--bad)" }}
+                        data-testid={`urgent-${key}`}
+                      >
+                        <AlertTriangle size={13} />
+                      </Button>
+                    )}
+                  </div>
                   {canResolve ? (
                     <Button size="sm" onClick={() => setOpenResolve(it)} style={{ background: "var(--good)" }} data-testid={`resolve-${key}`}>Resolver</Button>
                   ) : (
@@ -441,4 +498,16 @@ function Lbl({ label, children }) {
       {children}
     </div>
   );
+}
+
+function daysAgo(iso) {
+  if (!iso) return "";
+  const ms = Date.now() - new Date(iso).getTime();
+  const days = Math.floor(ms / 86400000);
+  if (days <= 0) {
+    const hours = Math.max(1, Math.floor(ms / 3600000));
+    return `${hours}h`;
+  }
+  if (days === 1) return "1 día";
+  return `${days} días`;
 }

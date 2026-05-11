@@ -68,6 +68,13 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
     - `Almacén` / `Almacén` (rol almacen, protected=true) — segundo almacén además del de email almacen@test.com
   - Login normaliza usuario y contraseña (lowercase + strip de acentos) para tolerar "Almacen"/"Almacén"/"almacen" indistintamente
   - Email obligatorio sigue siendo requerido para crear nuevos usuarios desde la UI; las cuentas internas no se crean desde UI
+- ✅ **Cola de trabajo Taller con urgencia (Feb 2026)**:
+  - Campos nuevos en units y vehicles: `urgent: bool` e `incident_opened_at: str`
+  - Nuevos endpoints (solo productor): `POST /incidents/{unit_id}/urgent` y `POST /vehicle-incidents/{vid}/urgent` con `{urgent: bool}`
+  - `create_incident` setea `incident_opened_at=now` y `urgent=false`
+  - `resolve_incident` hace `$unset` de ambos campos
+  - `list_incidents` ordena: urgentes primero, luego por `incident_opened_at` ascendente (más antiguas arriba). Backfill automático para legacy: usa fecha del último report log si no hay `incident_opened_at`
+  - UI Incidents.jsx: badge "🔥 URGENTE" rojo + borde izquierdo rojo + fondo rosado en tarjetas urgentes. Columna "hace Xh/Xd" tiempo abierta. Botón ⚠️ (solo productor) para toggle urgencia. Para rol taller, título cambia a "Cola de trabajo · Taller"
 
 ## Backlog
 ### P1
