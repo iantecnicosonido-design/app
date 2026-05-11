@@ -24,8 +24,8 @@ export default function AccountingDialog({ open, onOpenChange, event, onChanged 
     setInvoiceIva(event.event_invoice?.iva_pct ?? 21);
   }, [open, event]);
 
-  const techExpenses = useMemo(() => (event?.tech_invoices || []).reduce((s, i) => s + (parseFloat(i.amount) || 0), 0), [event]);
-  const rentalExpenses = useMemo(() => (event?.rental_invoices || []).reduce((s, i) => s + (parseFloat(i.amount) || 0), 0), [event]);
+  const techExpenses = useMemo(() => (event?.tech_invoices || []).reduce((s, i) => s + (parseFloat(i.total_incl_iva ?? i.amount) || 0), 0), [event]);
+  const rentalExpenses = useMemo(() => (event?.rental_invoices || []).reduce((s, i) => s + (parseFloat(i.total_incl_iva ?? i.amount) || 0), 0), [event]);
   const extras = event?.extra_accounting || [];
   const extraIngresos = extras.filter((e) => e.kind === "ingreso").reduce((s, e) => s + (e.amount_excl_iva || 0), 0);
   const extraGastos = extras.filter((e) => e.kind === "gasto").reduce((s, e) => s + (e.amount_excl_iva || 0), 0);

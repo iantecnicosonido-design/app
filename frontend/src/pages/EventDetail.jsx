@@ -583,6 +583,14 @@ export default function EventDetail() {
         </div>
       </div>
 
+      {/* Bolo only: Contacts + Documents (right after the ficha, before material) */}
+      {ev.type === "bolo" && (
+        <>
+          <ContactsSection event={ev} canEdit={canEditFicha && !isClosed} onChanged={load} />
+          <DocumentsSection event={ev} canEdit={canEditFicha && !isClosed} onChanged={load} />
+        </>
+      )}
+
       <div className="card-paper" style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material bloqueado del stock</h3>
@@ -758,13 +766,7 @@ export default function EventDetail() {
         ))}
       </div>
 
-      {/* Bolo only: Contacts + Documents */}
-      {ev.type === "bolo" && (
-        <>
-          <ContactsSection event={ev} canEdit={canEditFicha && !isClosed} onChanged={load} />
-          <DocumentsSection event={ev} canEdit={canEditFicha && !isClosed} onChanged={load} />
-        </>
-      )}
+      {/* Bolo only: Contacts + Documents moved up to be right after the ficha */}
 
       {/* Expenses (bolo only) */}
       {ev.type === "bolo" && (user?.role === "productor" || (user?.role === "tecnico" && ev.responsible_technician_id === user.id)) && (

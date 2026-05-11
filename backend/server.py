@@ -2899,10 +2899,50 @@ async def delete_expense(eid: str, xid: str, user: dict = Depends(get_current_us
 # ---------- Invoices (tech autónomo + rentals) ----------
 class InvoiceCreate(BaseModel):
     file: ExpenseFile
-    amount: Optional[float] = None
+    amount: Optional[float] = None  # legacy: si se envía, se interpreta como total con IVA
+    amount_excl_iva: Optional[float] = None
+    iva_pct: Optional[float] = None  # default 21 si no se especifica
+    irpf_pct: Optional[float] = None  # solo aplica a facturas de autónomos
     notes: str = ""
     provider_name: str = ""  # solo para rental_invoices
     rental_id: Optional[str] = None  # opcional para rental_invoices
+
+
+def _compute_invoice_amounts(payload: "InvoiceCreate", include_irpf: bool) -> Dict[str, Any]:
+    """Calcula los importes base, IVA, IRPF y totales de una factura.
+    - total_incl_iva = base + IVA  (este es el "gasto" desde el punto de vista contable, gastos van con IVA incluido)
+    - total_to_pay   = base + IVA - IRPF (lo que cobra el autónomo; igual a total_incl_iva en rentals)
+    Devuelve un dict listo para fusionar con el documento de factura.
+    """
+    base = payload.amount_excl_iva
+    iva_pct = payload.iva_pct if payload.iva_pct is not None else 21.0
+    irpf_pct = (payload.irpf_pct or 0.0) if include_irpf else 0.0
+    # Backwards compatibility: si solo viene `amount` legacy, lo tomamos como total CON IVA
+    if base is None and payload.amount is not None:
+        base = round(payload.amount / (1.0 + iva_pct / 100.0), 2) if iva_pct else float(payload.amount)
+    if base is None:
+        return {
+            "amount": payload.amount,
+            "amount_excl_iva": None,
+            "iva_pct": None,
+            "irpf_pct": None,
+            "total_incl_iva": None,
+            "total_to_pay": None,
+        }
+    base = round(float(base), 2)
+    iva_amt = round(base * (iva_pct or 0) / 100.0, 2)
+    irpf_amt = round(base * (irpf_pct or 0) / 100.0, 2)
+    total_incl_iva = round(base + iva_amt, 2)
+    total_to_pay = round(total_incl_iva - irpf_amt, 2)
+    return {
+        # Legacy `amount` => total con IVA (sin descontar IRPF) para que la contabilidad lo siga sumando bien
+        "amount": total_incl_iva,
+        "amount_excl_iva": base,
+        "iva_pct": round(float(iva_pct), 2),
+        "irpf_pct": round(float(irpf_pct), 2) if include_irpf else None,
+        "total_incl_iva": total_incl_iva,
+        "total_to_pay": total_to_pay,
+    }
 
 
 @api_router.post("/events/{eid}/tech-invoices")
@@ -2917,12 +2957,13 @@ async def add_tech_invoice(eid: str, payload: InvoiceCreate, user: dict = Depend
         raise HTTPException(404, "Event not found")
     if user["id"] not in (ev.get("assigned_technicians") or []):
         raise HTTPException(403, "No estás asignado a este evento")
+    amounts = _compute_invoice_amounts(payload, include_irpf=True)
     inv = {
         "id": str(uuid.uuid4()),
         "tech_id": user["id"],
         "tech_name": user.get("name") or user.get("email", ""),
         "file": payload.file.model_dump(),
-        "amount": payload.amount,
+        **amounts,
         "notes": payload.notes,
         "uploaded_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -2930,8 +2971,8 @@ async def add_tech_invoice(eid: str, payload: InvoiceCreate, user: dict = Depend
     # Notify productores
     link = f"/eventos/{eid}"
     title = f"{inv['tech_name']} ha subido una factura · {ev.get('name','')}"
-    amount_s = f"{inv['amount']} €" if inv.get("amount") is not None else ""
-    msg = f"Factura subida al evento <b>{ev.get('name','')}</b>{(' por valor de <b>' + amount_s + '</b>') if amount_s else ''}."
+    total_s = f"{inv['total_to_pay']} €" if inv.get("total_to_pay") is not None else (f"{inv['amount']} €" if inv.get("amount") is not None else "")
+    msg = f"Factura subida al evento <b>{ev.get('name','')}</b>{(' por valor de <b>' + total_s + '</b>') if total_s else ''}."
     await _notify_productores("tech_invoice_uploaded", title, msg, link)
     return inv
 
@@ -2957,12 +2998,13 @@ async def add_rental_invoice(eid: str, payload: InvoiceCreate, user: dict = Depe
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
+    amounts = _compute_invoice_amounts(payload, include_irpf=False)
     inv = {
         "id": str(uuid.uuid4()),
         "rental_id": payload.rental_id,
         "provider_name": payload.provider_name,
         "file": payload.file.model_dump(),
-        "amount": payload.amount,
+        **amounts,
         "notes": payload.notes,
         "uploaded_by": user["id"],
         "uploaded_by_name": user.get("name") or user.get("email", ""),
