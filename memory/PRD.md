@@ -101,6 +101,13 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Cada acción notifica a todos los productores activos con título "X ha aceptado/rechazado <evento>" (incluye motivo en caso de rechazo)
   - Email de asignación actualizado: título "Te han asignado un evento — pendiente de aceptar", CTA "Ver y aceptar bolo" apunta a `/eventos/{id}`
   - Frontend: banner amarillo gigante en EventDetail para el técnico asignado con status pendiente/rechazado con botones "✓ Aceptar bolo" / "X Rechazar". Badge PENDIENTE/ACEPTADO/RECHAZADO en cada chip de técnico (visible para productor)
+- ✅ **Duplicar material de evento anterior con resolución de conflictos (Feb 2026)**:
+  - Si el productor crea un bolo/alquiler con un nombre que coincide con otro evento anterior, aparece botón "Copiar de evento anterior" en sección Material con badge de número de candidatos
+  - Nuevos endpoints: `GET /events/similar-by-name?name=X&exclude=eid`, `GET /events/{eid}/duplicate-preview?source=eid_src`, `POST /events/{eid}/duplicate-from`
+  - Modal en 2 pasos: 1) selecciona evento origen entre candidatos con mismo nombre, 2) tabla con cada material y su disponibilidad real ahora. Para cada uno: copiar / sustituir (con search-select de sustituto + input cantidad) / eliminar
+  - Items con stock insuficiente aparecen en rojo con badge "Faltan N"; el dialog auto-marca esos como "sustituir" por defecto
+  - Aplicar es atómico-best-effort: cada item se aplica individualmente y se reportan los fallos al final via toast
+  - Nuevo componente: `/app/frontend/src/components/DuplicateMaterialDialog.jsx`
 
 ## Backlog
 ### P1

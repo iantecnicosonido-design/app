@@ -7,6 +7,7 @@ import os
 import json
 import io
 import logging
+import re
 import unicodedata
 import requests as http_requests
 from pathlib import Path
@@ -967,6 +968,34 @@ async def list_events(user: dict = Depends(get_current_user)):
     return await db.events.find(query, PROJ).sort("event_date", 1).to_list(5000)
 
 
+@api_router.get("/events/similar-by-name")
+async def events_similar_by_name(name: str, exclude: str = "", user: dict = Depends(get_current_user)):
+    """Return past events (with materials) sharing the same name. Case-insensitive."""
+    if not name.strip():
+        return []
+    pattern = f"^{re.escape(name.strip())}$"
+    q = {"name": {"$regex": pattern, "$options": "i"}}
+    if exclude:
+        q["id"] = {"$ne": exclude}
+    events = await db.events.find(q, PROJ).sort("created_at", -1).to_list(50)
+    out = []
+    for ev in events:
+        units_count = sum(len(m.get("units") or []) for m in (ev.get("materials") or []))
+        if units_count == 0:
+            continue
+        out.append({
+            "id": ev["id"],
+            "name": ev["name"],
+            "type": ev.get("type"),
+            "client_name": ev.get("client_name", ""),
+            "event_date": ev.get("event_date") or ev.get("setup_date") or "",
+            "materials_count": len(ev.get("materials") or []),
+            "units_count": units_count,
+        })
+    return out
+
+
+
 @api_router.get("/events/{eid}", response_model=Event)
 async def get_event(eid: str, user: dict = Depends(get_current_user)):
     ev = await db.events.find_one({"id": eid}, PROJ)
@@ -1089,6 +1118,88 @@ async def _compute_availability(eid: str, material_id: str):
 async def event_availability(eid: str, material_id: str, user: dict = Depends(get_current_user)):
     """Return list of available units for given material in the event's time window."""
     return await _compute_availability(eid, material_id)
+
+
+# ---------- Duplicate material from a previous event with same name ----------
+class DuplicateMaterialItem(BaseModel):
+    material_id: str
+    action: Literal["copy", "substitute", "skip"] = "copy"
+    quantity: int = 0
+    substitute_with: Optional[str] = None  # new material_id if action=substitute
+
+
+class DuplicateMaterialRequest(BaseModel):
+    source_event_id: str
+    items: List[DuplicateMaterialItem]
+
+
+@api_router.get("/events/{eid}/duplicate-preview")
+async def duplicate_material_preview(eid: str, source: str, user: dict = Depends(require_warehouse)):
+    """For the target event window, compute availability for each material in the source event."""
+    target = await db.events.find_one({"id": eid}, PROJ)
+    if not target:
+        raise HTTPException(404, "Event not found")
+    src = await db.events.find_one({"id": source}, PROJ)
+    if not src:
+        raise HTTPException(404, "Source event not found")
+    out = []
+    for em in src.get("materials") or []:
+        material_id = em["material_id"]
+        needed_qty = len(em.get("units") or [])
+        if needed_qty == 0:
+            continue
+        avail = await _compute_availability(eid, material_id)
+        available_count = avail["available_count"]
+        can_fully_copy = available_count >= needed_qty
+        out.append({
+            "material_id": material_id,
+            "name": em.get("name", ""),
+            "reference": em.get("reference", ""),
+            "category": em.get("category", ""),
+            "needed_qty": needed_qty,
+            "available_now": available_count,
+            "can_fully_copy": can_fully_copy,
+            "missing": max(0, needed_qty - available_count),
+        })
+    return {"source_event": {"id": src["id"], "name": src["name"]}, "items": out}
+
+
+@api_router.post("/events/{eid}/duplicate-from")
+async def duplicate_material_apply(eid: str, payload: DuplicateMaterialRequest, user: dict = Depends(require_warehouse)):
+    """Apply user-resolved duplication: for each item, block N units of material (or substitute, or skip)."""
+    target = await _assert_event_modifiable(eid, user)
+    src = await db.events.find_one({"id": payload.source_event_id}, PROJ)
+    if not src:
+        raise HTTPException(404, "Source event not found")
+    results = []
+    for item in payload.items:
+        if item.action == "skip":
+            results.append({"material_id": item.material_id, "action": "skip", "ok": True})
+            continue
+        target_material_id = item.material_id if item.action == "copy" else (item.substitute_with or "")
+        if not target_material_id:
+            results.append({"material_id": item.material_id, "action": item.action, "ok": False, "error": "Sustituto no especificado"})
+            continue
+        qty = max(1, int(item.quantity or 0))
+        # Auto-pick available units
+        avail = await _compute_availability(eid, target_material_id)
+        avail_units = [u for u in avail["units"] if u["available"]]
+        if len(avail_units) < qty:
+            results.append({
+                "material_id": item.material_id, "action": item.action, "ok": False,
+                "error": f"Solo {len(avail_units)} disponibles, pides {qty}",
+            })
+            continue
+        chosen = [u["id"] for u in avail_units[:qty]]
+        try:
+            await _block_units(eid, target_material_id, chosen, user)
+            results.append({"material_id": item.material_id, "action": item.action, "ok": True, "blocked": qty})
+        except HTTPException as he:
+            results.append({"material_id": item.material_id, "action": item.action, "ok": False, "error": he.detail})
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    return {"event": ev, "results": results}
+
+
 
 
 # ---------- Block / unblock material ----------

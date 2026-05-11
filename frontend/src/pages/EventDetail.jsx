@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, API, formatDate } from "../lib/api";
-import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck, UserPlus, Users as UsersIcon, PackageCheck, PackageOpen } from "lucide-react";
+import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck, UserPlus, Users as UsersIcon, PackageCheck, PackageOpen, Copy } from "lucide-react";
 import { useAuth, can } from "../lib/auth";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { DeliveryDialog } from "../components/DeliveryDialog";
 import { ReturnDialog } from "../components/ReturnDialog";
 import { CheckDialog } from "../components/CheckDialog";
+import DuplicateMaterialDialog from "../components/DuplicateMaterialDialog";
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
@@ -67,6 +68,8 @@ export default function EventDetail() {
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const [checkOpen, setCheckOpen] = useState(false);
+  const [dupOpen, setDupOpen] = useState(false);
+  const [dupCandidatesCount, setDupCandidatesCount] = useState(0);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -84,6 +87,14 @@ export default function EventDetail() {
     api.get("/technicians").then((r) => setTechnicians(r.data)).catch(() => {});
     /* eslint-disable-next-line */
   }, [id]);
+
+  // Detect duplicate candidates whenever event name changes / loads
+  useEffect(() => {
+    if (!ev?.name) { setDupCandidatesCount(0); return; }
+    api.get("/events/similar-by-name", { params: { name: ev.name, exclude: id } })
+      .then((r) => setDupCandidatesCount((r.data || []).length))
+      .catch(() => setDupCandidatesCount(0));
+  }, [ev?.name, id]);
 
   useEffect(() => {
     if (pickedMat) {
@@ -568,7 +579,13 @@ export default function EventDetail() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material bloqueado del stock</h3>
           {canMaterial && !isClosed && (
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {dupCandidatesCount > 0 && (
+                <Button onClick={() => setDupOpen(true)} variant="outline" size="sm" data-testid="duplicate-material-btn" title={`Hay ${dupCandidatesCount} evento(s) anterior(es) con el mismo nombre`}>
+                  <Copy size={14} /> Copiar de evento anterior
+                  <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", background: "var(--accent)", color: "#fff", borderRadius: 999, fontFamily: "JetBrains Mono, monospace" }}>{dupCandidatesCount}</span>
+                </Button>
+              )}
               <Button onClick={() => setPackOpen(true)} variant="outline" size="sm" data-testid="apply-pack-btn"><Package size={14} /> Aplicar pack</Button>
               <Button onClick={() => setMatOpen(true)} style={{ background: "var(--accent)" }} size="sm" data-testid="block-material-btn"><Plus size={14} /> Bloquear material</Button>
             </div>
@@ -735,6 +752,14 @@ export default function EventDetail() {
       <DeliveryDialog open={deliveryOpen} onClose={() => setDeliveryOpen(false)} eventId={id} onSaved={load} />
       <ReturnDialog open={returnOpen} onClose={() => setReturnOpen(false)} event={ev} onSaved={load} />
       <CheckDialog open={checkOpen} onClose={() => setCheckOpen(false)} event={ev} onSaved={load} />
+      <DuplicateMaterialDialog
+        open={dupOpen}
+        onOpenChange={setDupOpen}
+        eventId={id}
+        eventName={ev.name}
+        allMaterials={materials}
+        onApplied={(newEv) => { setEv(newEv); api.get("/units").then((r) => setAllUnits(r.data)); }}
+      />
 
       {/* Block material with search */}
       <Dialog open={matOpen} onOpenChange={(o) => { setMatOpen(o); if (!o) { setPickedMat(null); setSearchQ(""); } }}>
