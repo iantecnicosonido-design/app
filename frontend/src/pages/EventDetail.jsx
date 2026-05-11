@@ -344,6 +344,23 @@ export default function EventDetail() {
     } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
   };
 
+  const acceptAssignment = async () => {
+    try {
+      const r = await api.post(`/events/${id}/accept`);
+      setEv(r.data);
+      toast.success("¡Bolo aceptado!");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+  const declineAssignment = async () => {
+    const reason = window.prompt("Motivo del rechazo (opcional):", "");
+    if (reason === null) return;
+    try {
+      const r = await api.post(`/events/${id}/decline`, { reason });
+      setEv(r.data);
+      toast.success("Has rechazado el bolo. Productor notificado.");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
 
   const grouped = {};
   categories.forEach((c) => { grouped[c.key] = []; });
@@ -419,6 +436,47 @@ export default function EventDetail() {
           {canEditFicha && <Button variant="ghost" onClick={deleteEvent}><Trash2 size={16} color="#b91c1c" /></Button>}
         </div>
       </div>
+
+      {/* Tech acceptance banner (only for assigned techs with pending/declined status) */}
+      {user?.role === "tecnico" && (ev.assigned_technicians || []).includes(user.id) && (() => {
+        const myStatus = (ev.tech_status || {})[user.id] || "pendiente";
+        if (myStatus === "aceptado") return null;
+        const isDeclined = myStatus === "rechazado";
+        return (
+          <div
+            className="card-paper"
+            style={{
+              background: isDeclined ? "#fef2f2" : "#fffbeb",
+              border: `2px solid ${isDeclined ? "#fca5a5" : "#fbbf24"}`,
+              padding: 18, marginBottom: 18,
+            }}
+            data-testid="tech-accept-banner"
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: isDeclined ? "#991b1b" : "#92400e", marginBottom: 4 }}>
+                  {isDeclined ? "Has rechazado este bolo" : "Tienes este bolo pendiente de aceptar"}
+                </div>
+                <div style={{ fontSize: 13, color: isDeclined ? "#991b1b" : "#78350f" }}>
+                  {isDeclined
+                    ? "Si has cambiado de opinión, puedes aceptarlo. El productor recibirá notificación."
+                    : "Revisa los detalles abajo y acepta o rechaza el bolo. El productor recibirá una notificación."}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button onClick={acceptAssignment} style={{ background: "var(--good)" }} data-testid="accept-event-btn">
+                  ✓ Aceptar bolo
+                </Button>
+                {!isDeclined && (
+                  <Button onClick={declineAssignment} variant="outline" style={{ borderColor: "var(--bad)", color: "var(--bad)" }} data-testid="decline-event-btn">
+                    ✕ Rechazar
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Preparation status banner (read-only here; full editor in /preparacion) */}
       {totalUnits > 0 && (
@@ -597,12 +655,20 @@ export default function EventDetail() {
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {(ev.assigned_technicians || []).map((tid) => {
               const t = technicians.find((x) => x.id === tid);
+              const displayName = t ? (t.name || t.email) : (user?.id === tid ? (user.name || user.email) : tid.slice(0, 8));
               const isResp = ev.responsible_technician_id === tid;
+              const tstatus = (ev.tech_status || {})[tid] || "pendiente";
+              const reason = (ev.tech_decline_reason || {})[tid] || "";
+              const statusBg = tstatus === "aceptado" ? "#dcfce7" : tstatus === "rechazado" ? "#fee2e2" : "#fef3c7";
+              const statusColor = tstatus === "aceptado" ? "#166534" : tstatus === "rechazado" ? "#991b1b" : "#92400e";
               return (
-                <span key={tid} style={{ padding: "6px 12px", borderRadius: 999, background: isResp ? "#fef3c7" : "#dcfce7", color: isResp ? "#92400e" : "#166534", fontSize: 13, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 6 }} title={isResp ? "Responsable del evento" : ""}>
+                <span key={tid} style={{ padding: "6px 12px", borderRadius: 999, background: isResp ? "#fef9c3" : "#f5f5f4", border: "1px solid var(--line)", color: "var(--ink)", fontSize: 13, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 6 }} title={reason ? `Motivo: ${reason}` : (isResp ? "Responsable del evento" : "")}>
                   {isResp && <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", letterSpacing: "0.06em" }}>★</span>}
-                  {t ? (t.name || t.email) : tid}
+                  {displayName}
                   {t?.phone && <span style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace" }}>· {t.phone}</span>}
+                  <span style={{ marginLeft: 4, padding: "1px 8px", borderRadius: 999, background: statusBg, color: statusColor, fontSize: 9, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
+                    {tstatus}
+                  </span>
                 </span>
               );
             })}

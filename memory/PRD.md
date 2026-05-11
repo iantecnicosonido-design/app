@@ -94,6 +94,14 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Productor puede desmarcar SOLO si almacén aún no ha bloqueado (`prep_status="pendiente"`)
   - Frontend: botón verde "🔒 Listo para preparar" (productor) → cambia a outline "🔓 Desbloquear edición" cuando ya está marcado. Botón "Preparar" deshabilitado para almacén hasta que esté marcado (tooltip "Esperando productor"). Banner amarillo con estado claro y texto explicativo según rol.
 
+- ✅ **Aceptación de bolo por técnico + notif productor (Feb 2026)**:
+  - Nuevos campos en Event: `tech_status: Dict[str,str]` (`pendiente|aceptado|rechazado`) y `tech_decline_reason: Dict[str,str]`
+  - `assign_technicians` ahora setea `pendiente` a los nuevos asignados y limpia técnicos quitados
+  - Nuevos endpoints (rol tecnico): `POST /events/{eid}/accept`, `POST /events/{eid}/decline` (con `reason` opcional)
+  - Cada acción notifica a todos los productores activos con título "X ha aceptado/rechazado <evento>" (incluye motivo en caso de rechazo)
+  - Email de asignación actualizado: título "Te han asignado un evento — pendiente de aceptar", CTA "Ver y aceptar bolo" apunta a `/eventos/{id}`
+  - Frontend: banner amarillo gigante en EventDetail para el técnico asignado con status pendiente/rechazado con botones "✓ Aceptar bolo" / "X Rechazar". Badge PENDIENTE/ACEPTADO/RECHAZADO en cada chip de técnico (visible para productor)
+
 ## Backlog
 ### P1
 - Favicon (convertir `/app/frontend/public/logo.png` a 32x32 favicon.ico)

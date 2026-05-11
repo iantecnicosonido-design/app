@@ -308,6 +308,10 @@ class Event(BaseModel):
     assigned_technicians: List[str] = []
     responsible_technician_id: Optional[str] = None
     tech_notes: Dict[str, str] = Field(default_factory=dict)
+    # Estado de aceptación por técnico: {tech_id: "pendiente"|"aceptado"|"rechazado"}
+    tech_status: Dict[str, str] = Field(default_factory=dict)
+    # Razón de rechazo opcional por técnico: {tech_id: motivo}
+    tech_decline_reason: Dict[str, str] = Field(default_factory=dict)
     expenses: List[Expense] = []
     prep_status: Literal["pendiente", "preparado"] = "pendiente"
     prep_checks: List[str] = []  # unit ids marked as prepared by almacen
@@ -2506,6 +2510,15 @@ async def assign_technicians(eid: str, payload: TechAssignmentRequest, user: dic
     else:
         existing_notes = prev.get("tech_notes") or {}
         update["tech_notes"] = {tid: n for tid, n in existing_notes.items() if tid in tech_ids}
+    # tech_status: conserva el estado de los técnicos que continúan, marca PENDIENTE a los nuevos
+    prev_status = prev.get("tech_status") or {}
+    new_status: Dict[str, str] = {}
+    for tid in tech_ids:
+        new_status[tid] = prev_status.get(tid, "pendiente")
+    update["tech_status"] = new_status
+    # mantener motivos de rechazo solo para los que sigan
+    prev_reasons = prev.get("tech_decline_reason") or {}
+    update["tech_decline_reason"] = {tid: r for tid, r in prev_reasons.items() if tid in tech_ids}
     await db.events.update_one({"id": eid}, {"$set": update})
     res = await db.events.find_one({"id": eid}, PROJ)
     try:
@@ -2531,18 +2544,78 @@ async def assign_technicians(eid: str, payload: TechAssignmentRequest, user: dic
             is_resp = res.get("responsible_technician_id") == tid
             resp_html = "<br><br><b>Has sido marcado como responsable del evento.</b>" if is_resp else ""
             body = (f"Hola {tech.get('name') or tech['email']}, has sido asignado al evento "
-                    f"<b>{res.get('name','')}</b>.<br><br>"
+                    f"<b>{res.get('name','')}</b>. <b>Está pendiente de tu aceptación</b>.<br><br>"
                     f"<b>Fecha:</b> {date_str}<br>"
                     f"<b>Ubicación:</b> {res.get('location') or '—'}<br>"
                     f"<b>Cliente:</b> {res.get('client_name') or '—'}<br>"
                     f"<b>Horarios:</b> {res.get('schedule') or '—'}"
-                    f"{resp_html}{note_html}")
-            html = render_basic(title="Te han asignado a un evento", body_html=body,
-                                cta_label="Ver detalles", cta_url=ev_url, footer="Edison Rent")
+                    f"{resp_html}{note_html}<br><br>"
+                    "Entra en la app para ver todos los detalles y <b>aceptar</b> o <b>rechazar</b> el bolo.")
+            html = render_basic(title="Te han asignado un evento — pendiente de aceptar",
+                                body_html=body,
+                                cta_label="Ver y aceptar bolo", cta_url=ev_url, footer="Edison Rent")
             await send_email(tech["email"], f"Asignación: {res.get('name','evento')}", html)
     except Exception as e:
         logger.error("technician notify error: %s", e)
     return res
+
+
+class TechResponseRequest(BaseModel):
+    reason: str = ""
+
+
+@api_router.post("/events/{eid}/accept")
+async def accept_event(eid: str, user: dict = Depends(get_current_user)):
+    """El técnico asignado acepta el bolo. Notifica al productor."""
+    if user.get("role") != "tecnico":
+        raise HTTPException(403, "Solo técnicos pueden aceptar")
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if user["id"] not in (ev.get("assigned_technicians") or []):
+        raise HTTPException(403, "No estás asignado a este evento")
+    status = (ev.get("tech_status") or {}).get(user["id"], "pendiente")
+    if status == "aceptado":
+        raise HTTPException(400, "Ya habías aceptado este bolo")
+    status_map = dict(ev.get("tech_status") or {})
+    status_map[user["id"]] = "aceptado"
+    decl = dict(ev.get("tech_decline_reason") or {})
+    decl.pop(user["id"], None)
+    await db.events.update_one({"id": eid}, {"$set": {"tech_status": status_map, "tech_decline_reason": decl}})
+    # Notify productores
+    link = f"/eventos/{eid}"
+    title = f"{user.get('name') or user['email']} ha aceptado {ev.get('name','')}"
+    msg = (f"<b>{user.get('name') or user['email']}</b> ha aceptado el bolo "
+           f"<b>{ev.get('name','')}</b>.")
+    await _notify_productores("tech_accepted", title, msg, link)
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/decline")
+async def decline_event(eid: str, payload: TechResponseRequest, user: dict = Depends(get_current_user)):
+    """El técnico asignado rechaza el bolo. Notifica al productor con el motivo."""
+    if user.get("role") != "tecnico":
+        raise HTTPException(403, "Solo técnicos pueden rechazar")
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if user["id"] not in (ev.get("assigned_technicians") or []):
+        raise HTTPException(403, "No estás asignado a este evento")
+    status_map = dict(ev.get("tech_status") or {})
+    status_map[user["id"]] = "rechazado"
+    decl = dict(ev.get("tech_decline_reason") or {})
+    if payload.reason.strip():
+        decl[user["id"]] = payload.reason.strip()
+    await db.events.update_one({"id": eid}, {"$set": {"tech_status": status_map, "tech_decline_reason": decl}})
+    link = f"/eventos/{eid}"
+    title = f"{user.get('name') or user['email']} ha rechazado {ev.get('name','')}"
+    reason_html = f"<br><br><b>Motivo:</b> {payload.reason.strip()}" if payload.reason.strip() else ""
+    msg = (f"<b>{user.get('name') or user['email']}</b> ha rechazado el bolo "
+           f"<b>{ev.get('name','')}</b>.{reason_html}")
+    await _notify_productores("tech_declined", title, msg, link)
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
 
 
 # ---------- Expenses (bolos only) ----------
