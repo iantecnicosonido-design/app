@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, API, formatDate } from "../lib/api";
-import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck, UserPlus, Users as UsersIcon } from "lucide-react";
+import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck, UserPlus, Users as UsersIcon, PackageCheck, PackageOpen } from "lucide-react";
 import { useAuth, can } from "../lib/auth";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { DeliveryDialog } from "../components/DeliveryDialog";
+import { ReturnDialog } from "../components/ReturnDialog";
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
@@ -61,6 +63,8 @@ export default function EventDetail() {
   const [techSel, setTechSel] = useState([]);
   const [techNotes, setTechNotes] = useState({}); // {tid: note}
   const [techResponsible, setTechResponsible] = useState(null);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -346,6 +350,21 @@ export default function EventDetail() {
           <p className="page-sub" style={{ margin: 0 }}>{ev.client_name || "Sin cliente"} {ev.reference && `· Ref. ${ev.reference}`}</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {/* Entrega / Devolución (alquileres simples) */}
+          {ev.type === "alquiler" && (user?.role === "almacen" || user?.role === "productor") && (
+            <>
+              {!ev.delivery?.delivered_at && !isClosed && (
+                <Button onClick={() => setDeliveryOpen(true)} style={{ background: "#3730a3" }} data-testid="delivery-btn">
+                  <PackageOpen size={14} /> Entrega
+                </Button>
+              )}
+              {ev.delivery?.delivered_at && !ev.return_info?.returned_at && !isClosed && (
+                <Button onClick={() => setReturnOpen(true)} style={{ background: "#166534" }} data-testid="return-btn">
+                  <PackageCheck size={14} /> Devolución
+                </Button>
+              )}
+            </>
+          )}
           {(isAlmacen || canEditFicha) && totalUnits > 0 && (
             <Button
               onClick={() => navigate(`/eventos/${id}/preparacion`)}
@@ -584,6 +603,14 @@ export default function EventDetail() {
       {ev.type === "bolo" && (user?.role === "productor" || (user?.role === "tecnico" && ev.responsible_technician_id === user.id)) && (
         <ExpensesSection eventId={id} canEdit={!isClosed} userRole={user.role} userId={user.id} />
       )}
+
+      {/* Delivery/Return panel (alquileres only) */}
+      {ev.type === "alquiler" && (user?.role === "almacen" || user?.role === "productor") && (
+        <DeliveryReturnPanel ev={ev} />
+      )}
+
+      <DeliveryDialog open={deliveryOpen} onClose={() => setDeliveryOpen(false)} eventId={id} onSaved={load} />
+      <ReturnDialog open={returnOpen} onClose={() => setReturnOpen(false)} event={ev} onSaved={load} />
 
       {/* Block material with search */}
       <Dialog open={matOpen} onOpenChange={(o) => { setMatOpen(o); if (!o) { setPickedMat(null); setSearchQ(""); } }}>
@@ -1110,6 +1137,87 @@ function ExpensesSection({ eventId, canEdit, userRole, userId }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+
+// =================== Delivery / Return Panel ===================
+function DeliveryReturnPanel({ ev }) {
+  const d = ev.delivery;
+  const r = ev.return_info;
+  const fmtDt = (s) => {
+    if (!s) return "—";
+    try { return new Date(s).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }); }
+    catch { return s; }
+  };
+  const fileUrl = (rec, kind) => {
+    if (!rec) return null;
+    // download URL: try by storage_path pattern (file_id + ext). We use the API /files/{path} for download.
+    // For simplicity we use a redirect endpoint based on file_id with auth header — but img src can't pass headers.
+    // Workaround: open file via the storage_path. We don't know the ext here; assume jpg/png/pdf works via content-type.
+    // We'll just expose a tiny endpoint using the file id via /files/edison/uploads/{id}.<ext>. We don't have ext here.
+    // So we use a generic fetch and create a blob URL on click.
+    return null;
+  };
+  // eslint-disable-next-line no-unused-vars
+  void fileUrl;
+
+  const Pill = ({ color, bg, children, testId }) => (
+    <span data-testid={testId} style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 999, background: bg, color, textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "JetBrains Mono, monospace" }}>{children}</span>
+  );
+
+  const openFile = async (fileId) => {
+    if (!fileId) return;
+    try {
+      const resp = await api.get(`/file-by-id/${fileId}`, { responseType: "blob" });
+      const blob = new Blob([resp.data], { type: resp.headers["content-type"] });
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch {
+      toast.error("No se pudo abrir el archivo");
+    }
+  };
+
+  return (
+    <div className="card-paper" style={{ marginBottom: 18, border: "1px solid var(--line)" }} data-testid="delivery-return-panel">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Entrega y devolución</h3>
+        <div style={{ display: "flex", gap: 6 }}>
+          {!d && <Pill color="#78716c" bg="#f5f5f4" testId="status-pending">Pendiente de entrega</Pill>}
+          {d && !r && <Pill color="#3730a3" bg="#e0e7ff" testId="status-delivered">Entregado</Pill>}
+          {r && <Pill color="#166534" bg="#dcfce7" testId="status-returned">Devuelto</Pill>}
+        </div>
+      </div>
+
+      {d && (
+        <div style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "#fafaf9", marginBottom: r ? 10 : 0 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 13 }}>
+            <div><b style={{ color: "var(--ink-mute)" }}>Fecha entrega:</b><br/>{fmtDt(d.delivered_at)}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Pago:</b><br/>{(d.payment_method || "—").toUpperCase()}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Fianza:</b><br/>{d.has_deposit ? `${Number(d.deposit_amount || 0).toFixed(2)} EUR` : "—"}</div>
+            {d.client_email && <div style={{ gridColumn: "1 / -1" }}><b style={{ color: "var(--ink-mute)" }}>Email cliente:</b> {d.client_email}</div>}
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {d.doc_file_id && <Button size="sm" variant="outline" onClick={() => openFile(d.doc_file_id)} data-testid="open-delivery-pdf"><FileDown size={14} /> PDF entrega</Button>}
+            {d.dni_front_file_id && <Button size="sm" variant="outline" onClick={() => openFile(d.dni_front_file_id)} data-testid="open-dni-front">DNI anverso</Button>}
+            {d.dni_back_file_id && <Button size="sm" variant="outline" onClick={() => openFile(d.dni_back_file_id)} data-testid="open-dni-back">DNI reverso</Button>}
+          </div>
+        </div>
+      )}
+
+      {r && (
+        <div style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "#f0fdf4" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 13 }}>
+            <div><b style={{ color: "var(--ink-mute)" }}>Fecha devolución:</b><br/>{fmtDt(r.returned_at)}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Incidencias abiertas:</b><br/>{r.incidents_opened || 0}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Items revisados:</b><br/>{(r.items || []).length}</div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {r.doc_file_id && <Button size="sm" variant="outline" onClick={() => openFile(r.doc_file_id)} data-testid="open-return-pdf"><FileDown size={14} /> PDF devolución</Button>}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -294,6 +294,9 @@ class Event(BaseModel):
     prep_locked_by: Optional[str] = None
     prep_locked_by_name: str = ""
     prep_log: List[Dict[str, Any]] = []
+    # Alquileres only — delivery & return
+    delivery: Optional[Dict[str, Any]] = None
+    return_info: Optional[Dict[str, Any]] = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -932,14 +935,15 @@ async def get_event(eid: str, user: dict = Depends(get_current_user)):
 
 @api_router.post("/events", response_model=Event)
 async def create_event(payload: EventCreate, _u: dict = Depends(require_productor)):
-    e = Event(**payload.model_dump())
+    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    e = Event(**data)
     await db.events.insert_one(e.model_dump())
     return e
 
 
 @api_router.post("/events/bulk")
 async def bulk_create_events(payload: BulkEventsRequest, _u: dict = Depends(require_productor)):
-    docs = [Event(**ec.model_dump()).model_dump() for ec in payload.events]
+    docs = [Event(**{k: v for k, v in ec.model_dump().items() if v is not None}).model_dump() for ec in payload.events]
     if docs:
         await db.events.insert_many(docs)
     return {"created": len(docs)}
@@ -1871,6 +1875,241 @@ async def download_file(path: str):
         raise HTTPException(404, "File not found")
     data, ct = get_object(path)
     return Response(content=data, media_type=rec.get("content_type", ct))
+
+
+@api_router.get("/file-by-id/{fid}")
+async def download_file_by_id(fid: str, _user: dict = Depends(get_current_user)):
+    rec = await db.files.find_one({"id": fid, "is_deleted": False})
+    if not rec:
+        raise HTTPException(404, "File not found")
+    data, ct = get_object(rec["storage_path"])
+    return Response(content=data, media_type=rec.get("content_type", ct),
+                    headers={"Content-Disposition": f'inline; filename="{rec.get("name","file")}"'})
+
+
+# ---------- Rental: Delivery & Return ----------
+from rental_pdf import build_delivery_pdf, build_return_pdf  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+
+
+class DeliveryFile(BaseModel):
+    file_id: str
+    name: str = ""
+    content_type: str = ""
+
+
+class DeliveryRequest(BaseModel):
+    has_deposit: bool = False
+    deposit_amount: float = 0.0
+    payment_method: Literal["efectivo", "tarjeta", "transferencia"]
+    legal_accepted: bool
+    client_email: Optional[str] = None
+    signature_file_id: str
+    dni_front_file_id: Optional[str] = None
+    dni_back_file_id: Optional[str] = None
+
+
+class ReturnItemStatus(BaseModel):
+    id: str  # unit_id or rental_id
+    kind: Literal["unit", "rental"] = "unit"
+    material_id: Optional[str] = None  # required when kind=unit (parent material in event)
+    status: Literal["ok", "nok", "missing"]
+    note: str = ""
+
+
+class ReturnRequest(BaseModel):
+    signature_file_id: str
+    items: List[ReturnItemStatus]
+
+
+def _almacen_or_productor(user: dict):
+    if user.get("role") not in ("almacen", "productor"):
+        raise HTTPException(403, "Solo Almacén o Productor")
+
+
+async def _file_to_temp(file_id: str) -> Optional[str]:
+    """Download a stored file to a temp path and return the path (caller deletes)."""
+    if not file_id:
+        return None
+    rec = await db.files.find_one({"id": file_id, "is_deleted": False})
+    if not rec:
+        return None
+    try:
+        data, _ct = get_object(rec["storage_path"])
+        ext = rec.get("name", "f").split(".")[-1] if "." in rec.get("name", "") else "png"
+        tmp = _tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+        tmp.write(data)
+        tmp.close()
+        return tmp.name
+    except Exception:
+        return None
+
+
+async def _store_pdf(event_id: str, pdf_bytes: bytes, name: str) -> dict:
+    fid = str(uuid.uuid4())
+    path = f"{APP_NAME}/uploads/{fid}.pdf"
+    put_object(path, pdf_bytes, "application/pdf")
+    rec = {
+        "id": fid, "storage_path": path, "name": name,
+        "content_type": "application/pdf", "size": len(pdf_bytes),
+        "created_at": datetime.now(timezone.utc).isoformat(), "is_deleted": False,
+    }
+    await db.files.insert_one(rec)
+    return {"file_id": fid, "name": name, "content_type": "application/pdf"}
+
+
+@api_router.post("/events/{eid}/delivery")
+async def submit_delivery(eid: str, payload: DeliveryRequest, user: dict = Depends(get_current_user)):
+    _almacen_or_productor(user)
+    if not payload.legal_accepted:
+        raise HTTPException(400, "Debes aceptar el aviso legal")
+    if payload.has_deposit and payload.deposit_amount < 0:
+        raise HTTPException(400, "Importe de fianza inválido")
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("type") != "alquiler":
+        raise HTTPException(400, "Entrega solo disponible para alquileres simples")
+    if (ev.get("delivery") or {}).get("delivered_at"):
+        raise HTTPException(400, "Este alquiler ya tiene una entrega registrada")
+    delivered_at = datetime.now(timezone.utc).isoformat()
+    delivery_doc: dict = {
+        "delivered_at": delivered_at,
+        "has_deposit": payload.has_deposit,
+        "deposit_amount": float(payload.deposit_amount) if payload.has_deposit else 0.0,
+        "payment_method": payload.payment_method,
+        "client_email": (payload.client_email or "").strip() or None,
+        "legal_accepted": True,
+        "signature_file_id": payload.signature_file_id,
+        "dni_front_file_id": payload.dni_front_file_id,
+        "dni_back_file_id": payload.dni_back_file_id,
+        "by_user_id": user["id"],
+        "by_user_name": user.get("name") or user.get("email", ""),
+    }
+    # Generate PDF
+    sig_path = await _file_to_temp(payload.signature_file_id)
+    try:
+        pdf_bytes = build_delivery_pdf({**ev, "delivery": delivery_doc}, delivery_doc, sig_path)
+    finally:
+        if sig_path:
+            try:
+                os.unlink(sig_path)
+            except Exception:
+                pass
+    stored = await _store_pdf(eid, pdf_bytes, f"entrega_{(ev.get('reference') or ev.get('name','evento')).replace(' ', '_')}.pdf")
+    delivery_doc["doc_file_id"] = stored["file_id"]
+    delivery_doc["doc_name"] = stored["name"]
+    await db.events.update_one({"id": eid}, {"$set": {"delivery": delivery_doc}})
+
+    # Optional email to client (sandbox mode: only verified address receives)
+    if delivery_doc["client_email"]:
+        try:
+            html = render_basic(
+                title="Recibo de entrega · Edison Rent",
+                body_html=(
+                    f"Hola {ev.get('client_name','cliente')},<br><br>"
+                    "Adjuntamos el recibo de entrega del material alquilado. "
+                    "Guárdalo para la devolución.<br><br>"
+                    "Gracias por confiar en Edison Rent."
+                ),
+                footer="EDISON RENT SL · B60800301",
+            )
+            await send_email(
+                delivery_doc["client_email"],
+                f"Entrega de material – {ev.get('name','Alquiler')}",
+                html,
+                attachments=[{"filename": stored["name"], "content": pdf_bytes}],
+            )
+        except Exception as e:
+            logger.error("delivery email error: %s", e)
+
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/return")
+async def submit_return(eid: str, payload: ReturnRequest, user: dict = Depends(get_current_user)):
+    _almacen_or_productor(user)
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("type") != "alquiler":
+        raise HTTPException(400, "Devolución solo disponible para alquileres simples")
+    delivery = ev.get("delivery") or {}
+    if not delivery.get("delivered_at"):
+        raise HTTPException(400, "Primero hay que registrar la entrega")
+    if (ev.get("return_info") or {}).get("returned_at"):
+        raise HTTPException(400, "Devolución ya registrada")
+
+    returned_at = datetime.now(timezone.utc).isoformat()
+    return_doc: dict = {
+        "returned_at": returned_at,
+        "signature_file_id": payload.signature_file_id,
+        "items": [it.model_dump() for it in payload.items],
+        "by_user_id": user["id"],
+        "by_user_name": user.get("name") or user.get("email", ""),
+    }
+
+    # Apply consequences: nok/missing → mark unit broken + create incident
+    incident_count = 0
+    for it in payload.items:
+        if it.kind != "unit":
+            continue
+        if it.status in ("nok", "missing"):
+            await db.units.update_one({"id": it.id}, {"$set": {"status": "broken"}})
+            desc = (
+                f"Devolución alquiler '{ev.get('name','')}': "
+                + ("dañado" if it.status == "nok" else "faltante")
+                + (f". Nota: {it.note}" if it.note else "")
+            )
+            log = IncidentLog(
+                unit_id=it.id, type="report", status="broken",
+                description=desc, files=[],
+            )
+            await db.incident_logs.insert_one(log.model_dump())
+            incident_count += 1
+    return_doc["incidents_opened"] = incident_count
+
+    # Generate PDF
+    delivery_sig_path = await _file_to_temp(delivery.get("signature_file_id"))
+    return_sig_path = await _file_to_temp(payload.signature_file_id)
+    try:
+        pdf_bytes = build_return_pdf(ev, delivery, return_doc, delivery_sig_path, return_sig_path)
+    finally:
+        for p in (delivery_sig_path, return_sig_path):
+            if p:
+                try:
+                    os.unlink(p)
+                except Exception:
+                    pass
+    stored = await _store_pdf(eid, pdf_bytes, f"devolucion_{(ev.get('reference') or ev.get('name','evento')).replace(' ', '_')}.pdf")
+    return_doc["doc_file_id"] = stored["file_id"]
+    return_doc["doc_name"] = stored["name"]
+    await db.events.update_one({"id": eid}, {"$set": {"return_info": return_doc}})
+
+    # Optional email re-send with return PDF
+    if delivery.get("client_email"):
+        try:
+            html = render_basic(
+                title="Acta de devolución · Edison Rent",
+                body_html=(
+                    f"Hola {ev.get('client_name','cliente')},<br><br>"
+                    "Adjuntamos el acta de devolución del material alquilado. "
+                    "Gracias por confiar en Edison Rent."
+                ),
+                footer="EDISON RENT SL · B60800301",
+            )
+            await send_email(
+                delivery["client_email"],
+                f"Devolución de material – {ev.get('name','Alquiler')}",
+                html,
+                attachments=[{"filename": stored["name"], "content": pdf_bytes}],
+            )
+        except Exception as e:
+            logger.error("return email error: %s", e)
+
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
 
 
 # ---------- Technician assignment with notes + responsible ----------
