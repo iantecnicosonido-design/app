@@ -11,6 +11,7 @@ import Packs from "@/pages/Packs";
 import Incidents from "@/pages/Incidents";
 import Timeline from "@/pages/Timeline";
 import Flightcases from "@/pages/Flightcases";
+import Vehicles from "@/pages/Vehicles";
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
             <Route path="/proveedores" element={<Providers />} />
             <Route path="/packs" element={<Packs />} />
             <Route path="/flightcases" element={<Flightcases />} />
+            <Route path="/vehiculos" element={<Vehicles />} />
             <Route path="/incidencias" element={<Incidents />} />
             <Route path="/timeline" element={<Timeline />} />
           </Route>

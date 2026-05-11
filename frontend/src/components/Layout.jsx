@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, Boxes, CalendarDays, Building2, Wrench, Package, GanttChartSquare, Box } from "lucide-react";
+import { LayoutDashboard, Boxes, CalendarDays, Building2, Wrench, Package, GanttChartSquare, Box, Truck } from "lucide-react";
 
 const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard", exact: true },
@@ -8,6 +8,7 @@ const navItems = [
   { to: "/timeline", icon: GanttChartSquare, label: "Timeline" },
   { to: "/packs", icon: Package, label: "Packs" },
   { to: "/flightcases", icon: Box, label: "Flightcases" },
+  { to: "/vehiculos", icon: Truck, label: "Vehículos" },
   { to: "/incidencias", icon: Wrench, label: "Incidencias" },
   { to: "/proveedores", icon: Building2, label: "Proveedores" },
 ];

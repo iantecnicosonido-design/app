@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, API, formatDate } from "../lib/api";
-import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box } from "lucide-react";
+import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -46,6 +46,9 @@ export default function EventDetail() {
   const [distOpen, setDistOpen] = useState(false);
   const [distMat, setDistMat] = useState(null);
   const [distMap, setDistMap] = useState({}); // {fc_name: qty}
+  const [vehOpen, setVehOpen] = useState(false);
+  const [vehAvail, setVehAvail] = useState([]);
+  const [vehForm, setVehForm] = useState({ type: "owned", vehicle_id: "", name: "", plate: "", notes: "" });
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -201,6 +204,34 @@ export default function EventDetail() {
       setDistOpen(false);
       setDistMat(null);
       toast.success("Distribución actualizada");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const openAddVehicle = async () => {
+    try {
+      const r = await api.get(`/events/${id}/vehicle-availability`);
+      setVehAvail(r.data);
+    } catch { setVehAvail([]); }
+    setVehForm({ type: "owned", vehicle_id: "", name: "", plate: "", notes: "" });
+    setVehOpen(true);
+  };
+
+  const submitVehicle = async () => {
+    if (vehForm.type === "owned" && !vehForm.vehicle_id) { toast.error("Elige un vehículo"); return; }
+    if (vehForm.type === "rental" && !vehForm.name.trim()) { toast.error("Nombre del vehículo de alquiler obligatorio"); return; }
+    try {
+      const r = await api.post(`/events/${id}/vehicles`, vehForm);
+      setEv(r.data);
+      setVehOpen(false);
+      toast.success("Vehículo añadido");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const removeVehicle = async (vid) => {
+    try {
+      const r = await api.delete(`/events/${id}/vehicles/${vid}`);
+      setEv(r.data);
+      toast.success("Vehículo retirado");
     } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
   };
 
@@ -389,6 +420,30 @@ export default function EventDetail() {
         )}
       </div>
 
+      <div className="card-paper" style={{ marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}><Truck size={18} /> Vehículos</h3>
+          {!isClosed && <Button onClick={openAddVehicle} style={{ background: "var(--accent)" }} size="sm" data-testid="add-vehicle-event-btn"><Plus size={14} /> Añadir vehículo</Button>}
+        </div>
+        {(ev.vehicles || []).length === 0 ? (
+          <p style={{ color: "var(--ink-mute)", fontSize: 14 }}>Sin vehículos asignados.</p>
+        ) : (
+          (ev.vehicles || []).map((vh) => (
+            <div key={vh.id} className="row-hover" style={{ display: "grid", gridTemplateColumns: "120px 1fr 100px 60px", padding: "10px 4px", borderBottom: "1px solid var(--line)", alignItems: "center", gap: 8 }}>
+              <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>{vh.plate || "—"}</span>
+              <div>
+                <div style={{ fontWeight: 500 }}>{vh.name || "(sin nombre)"}</div>
+                {vh.notes && <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{vh.notes}</div>}
+              </div>
+              <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", padding: "3px 10px", borderRadius: 999, background: vh.type === "owned" ? "#dcfce7" : "#e0e7ff", color: vh.type === "owned" ? "#166534" : "#3730a3", textAlign: "center" }}>
+                {vh.type === "owned" ? "PROPIO" : "ALQUILER"}
+              </span>
+              <div style={{ textAlign: "right" }}>{!isClosed && <Button size="icon" variant="ghost" onClick={() => removeVehicle(vh.id)}><Trash2 size={14} /></Button>}</div>
+            </div>
+          ))
+        )}
+      </div>
+
       <div className="card-paper">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material de alquiler externo</h3>
@@ -473,6 +528,67 @@ export default function EventDetail() {
               ))}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Add vehicle */}
+      <Dialog open={vehOpen} onOpenChange={setVehOpen}>
+        <DialogContent style={{ maxWidth: 560 }} data-testid="add-vehicle-dialog">
+          <DialogHeader><DialogTitle>Añadir vehículo</DialogTitle></DialogHeader>
+          <div style={{ display: "grid", gap: 12 }}>
+            <Lbl label="Tipo">
+              <div style={{ display: "flex", gap: 6 }}>
+                <Button size="sm" variant={vehForm.type === "owned" ? "default" : "outline"} onClick={() => setVehForm({ ...vehForm, type: "owned", name: "", plate: "" })} style={vehForm.type === "owned" ? { background: "var(--accent)" } : {}} data-testid="veh-type-owned">Propio de la empresa</Button>
+                <Button size="sm" variant={vehForm.type === "rental" ? "default" : "outline"} onClick={() => setVehForm({ ...vehForm, type: "rental", vehicle_id: "" })} style={vehForm.type === "rental" ? { background: "var(--accent)" } : {}} data-testid="veh-type-rental">Alquilado</Button>
+              </div>
+            </Lbl>
+            {vehForm.type === "owned" ? (
+              <Lbl label="Vehículo">
+                <div style={{ display: "grid", gap: 6 }}>
+                  {vehAvail.length === 0 && <p style={{ fontSize: 12, color: "var(--ink-mute)" }}>No hay vehículos. <Link to="/vehiculos" className="subtle-link">Crea uno</Link>.</p>}
+                  {vehAvail.map((v) => (
+                    <button
+                      key={v.id}
+                      onClick={() => v.available && setVehForm({ ...vehForm, vehicle_id: v.id })}
+                      disabled={!v.available}
+                      data-testid={`veh-pick-${v.plate}`}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "120px 1fr 130px",
+                        gap: 8,
+                        padding: "10px 14px",
+                        borderRadius: 8,
+                        border: vehForm.vehicle_id === v.id ? "2px solid var(--accent)" : "1px solid var(--line)",
+                        background: vehForm.vehicle_id === v.id ? "#fffbeb" : "#fff",
+                        cursor: v.available ? "pointer" : "not-allowed",
+                        opacity: v.available ? 1 : 0.5,
+                        textAlign: "left",
+                        alignItems: "center",
+                      }}
+                    >
+                      <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{v.plate}</span>
+                      <span style={{ fontWeight: 500 }}>{v.name}</span>
+                      <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", color: v.available ? "var(--good)" : "var(--bad)", textAlign: "right" }}>{v.available ? "DISPONIBLE" : v.reason}</span>
+                    </button>
+                  ))}
+                </div>
+              </Lbl>
+            ) : (
+              <>
+                <Lbl label="Nombre / empresa de alquiler">
+                  <Input value={vehForm.name} onChange={(e) => setVehForm({ ...vehForm, name: e.target.value })} placeholder="Ej: Furgo Sixt" data-testid="veh-rental-name" />
+                </Lbl>
+                <Lbl label="Matrícula (opcional)">
+                  <Input value={vehForm.plate} onChange={(e) => setVehForm({ ...vehForm, plate: e.target.value.toUpperCase() })} data-testid="veh-rental-plate" />
+                </Lbl>
+              </>
+            )}
+            <Lbl label="Notas"><Textarea rows={2} value={vehForm.notes} onChange={(e) => setVehForm({ ...vehForm, notes: e.target.value })} /></Lbl>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVehOpen(false)}>Cancelar</Button>
+            <Button onClick={submitVehicle} style={{ background: "var(--accent)" }} data-testid="confirm-add-vehicle-btn">Añadir</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

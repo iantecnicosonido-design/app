@@ -192,6 +192,15 @@ class RentalItem(BaseModel):
     notes: str = ""
 
 
+class EventVehicle(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    type: Literal["owned", "rental"] = "owned"
+    vehicle_id: Optional[str] = None
+    name: str = ""
+    plate: str = ""
+    notes: str = ""
+
+
 class Event(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
@@ -216,6 +225,7 @@ class Event(BaseModel):
     status: EventStatus = "abierto"
     materials: List[EventMaterial] = []
     rentals: List[RentalItem] = []
+    vehicles: List[EventVehicle] = []
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -307,8 +317,38 @@ class CableDistributionRequest(BaseModel):
     distribution: Dict[str, int]  # {flightcase_name: qty}, "" key for unassigned
 
 
+class Vehicle(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    plate: str
+    status: UnitStatus = "available"  # available|broken|repair
+    notes: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class VehicleCreate(BaseModel):
+    name: str
+    plate: str
+    notes: str = ""
+
+
+class VehicleUpdate(BaseModel):
+    name: Optional[str] = None
+    plate: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class EventVehicleAdd(BaseModel):
+    type: Literal["owned", "rental"] = "owned"
+    vehicle_id: Optional[str] = None
+    name: str = ""
+    plate: str = ""
+    notes: str = ""
+
+
 class IncidentCreate(BaseModel):
-    unit_id: str
+    unit_id: Optional[str] = None
+    vehicle_id: Optional[str] = None
     status: Literal["broken", "repair"] = "broken"
     description: str
     files: List[Dict[str, Any]] = []  # [{path, name, content_type}]
@@ -316,7 +356,8 @@ class IncidentCreate(BaseModel):
 
 class IncidentLog(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    unit_id: str
+    unit_id: Optional[str] = None
+    vehicle_id: Optional[str] = None
     type: Literal["report", "update", "resolve"]
     status: str = ""
     description: str = ""
@@ -446,6 +487,15 @@ async def seed_and_migrate():
     if not await db.categories.find_one({"key": "cables"}):
         await db.categories.insert_one(CategoryModel(**{"key": "cables", "label": "Cables", "prefix": "CAB", "has_subitems": False, "has_unit_refs": False, "order": 5}).model_dump())
 
+    # seed default vehicles if empty
+    if await db.vehicles.count_documents({}) == 0:
+        for v in [
+            {"name": "Renault", "plate": "3880LTX"},
+            {"name": "Jumper", "plate": "2904KXT"},
+            {"name": "Opel", "plate": "9737KHM"},
+        ]:
+            await db.vehicles.insert_one(Vehicle(**v).model_dump())
+
     # 1. seed materials if empty
     if await db.materials.count_documents({}) == 0:
         seed_path = ROOT_DIR / "seed_inventory.json"
@@ -521,6 +571,62 @@ async def delete_category(key: str):
     if await db.materials.count_documents({"category": key}) > 0:
         raise HTTPException(400, "Hay materiales en esta categoría. Muévelos primero.")
     await db.categories.delete_one({"key": key})
+    return {"ok": True}
+
+
+# ---------- Vehicles ----------
+async def _vehicle_with_counts(v: dict) -> dict:
+    v["incident_count"] = await db.incident_logs.count_documents({"vehicle_id": v["id"], "type": "report"})
+    return v
+
+
+@api_router.get("/vehicles")
+async def list_vehicles():
+    items = await db.vehicles.find({}, PROJ).sort("name", 1).to_list(500)
+    for v in items:
+        await _vehicle_with_counts(v)
+    return items
+
+
+@api_router.post("/vehicles", response_model=Vehicle)
+async def create_vehicle(payload: VehicleCreate):
+    name = payload.name.strip()
+    plate = payload.plate.strip().upper()
+    if not name or not plate:
+        raise HTTPException(400, "Nombre y matrícula obligatorios")
+    if await db.vehicles.find_one({"plate": plate}, PROJ):
+        raise HTTPException(400, "Ya existe un vehículo con esa matrícula")
+    v = Vehicle(name=name, plate=plate, notes=payload.notes)
+    await db.vehicles.insert_one(v.model_dump())
+    return v
+
+
+@api_router.put("/vehicles/{vid}", response_model=Vehicle)
+async def update_vehicle(vid: str, payload: VehicleUpdate):
+    v = await db.vehicles.find_one({"id": vid}, PROJ)
+    if not v:
+        raise HTTPException(404, "Vehículo no encontrado")
+    upd = {k: val for k, val in payload.model_dump(exclude_none=True).items()}
+    if "plate" in upd:
+        upd["plate"] = upd["plate"].strip().upper()
+        dup = await db.vehicles.find_one({"plate": upd["plate"], "id": {"$ne": vid}}, PROJ)
+        if dup:
+            raise HTTPException(400, "Ya existe un vehículo con esa matrícula")
+    if upd:
+        await db.vehicles.update_one({"id": vid}, {"$set": upd})
+    return await db.vehicles.find_one({"id": vid}, PROJ)
+
+
+@api_router.delete("/vehicles/{vid}")
+async def delete_vehicle(vid: str):
+    v = await db.vehicles.find_one({"id": vid}, PROJ)
+    if not v:
+        raise HTTPException(404, "Vehículo no encontrado")
+    # block delete if used in any event
+    used = await db.events.count_documents({"vehicles.vehicle_id": vid})
+    if used:
+        raise HTTPException(400, f"En uso en {used} evento(s). Quítalo de los eventos primero.")
+    await db.vehicles.delete_one({"id": vid})
     return {"ok": True}
 
 
@@ -1003,6 +1109,80 @@ async def remove_rental(eid: str, rid: str):
     return await db.events.find_one({"id": eid}, PROJ)
 
 
+# ---------- Event vehicles ----------
+@api_router.get("/events/{eid}/vehicle-availability")
+async def event_vehicle_availability(eid: str):
+    """List of owned vehicles with availability status for the event window."""
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    cw = event_window(ev)
+    others = await db.events.find({"id": {"$ne": eid}}, PROJ).to_list(5000)
+    busy_ids: set = set()
+    for oev in others:
+        if overlaps(cw, event_window(oev)):
+            for v in oev.get("vehicles", []):
+                if v.get("type") == "owned" and v.get("vehicle_id"):
+                    busy_ids.add(v["vehicle_id"])
+    out = []
+    for v in await db.vehicles.find({}, PROJ).sort("name", 1).to_list(500):
+        reason = None
+        if v.get("status") == "broken":
+            reason = "averiado"
+        elif v.get("status") == "repair":
+            reason = "en reparación"
+        elif v["id"] in busy_ids:
+            reason = "ocupado en otro evento"
+        out.append({**v, "available": reason is None, "reason": reason})
+    return out
+
+
+@api_router.post("/events/{eid}/vehicles")
+async def add_event_vehicle(eid: str, payload: EventVehicleAdd):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("status") == "cerrado":
+        raise HTTPException(400, "Evento cerrado")
+    if payload.type == "owned":
+        if not payload.vehicle_id:
+            raise HTTPException(400, "vehicle_id requerido para tipo owned")
+        veh = await db.vehicles.find_one({"id": payload.vehicle_id}, PROJ)
+        if not veh:
+            raise HTTPException(404, "Vehículo no encontrado")
+        if veh.get("status") in ("broken", "repair"):
+            raise HTTPException(400, f"Vehículo {veh['name']} {veh['plate']} en estado {veh['status']}")
+        # check overlap
+        cw = event_window(ev)
+        for oev in await db.events.find({"id": {"$ne": eid}}, PROJ).to_list(5000):
+            if overlaps(cw, event_window(oev)):
+                for ov in oev.get("vehicles", []):
+                    if ov.get("type") == "owned" and ov.get("vehicle_id") == payload.vehicle_id:
+                        raise HTTPException(400, f"Vehículo ocupado en {oev.get('name','otro evento')}")
+        # avoid double-add in same event
+        for ov in ev.get("vehicles", []):
+            if ov.get("type") == "owned" and ov.get("vehicle_id") == payload.vehicle_id:
+                raise HTTPException(400, "Ya está añadido a este evento")
+        item = EventVehicle(type="owned", vehicle_id=payload.vehicle_id, name=veh["name"], plate=veh["plate"], notes=payload.notes)
+    else:
+        if not payload.name.strip():
+            raise HTTPException(400, "Nombre del vehículo de alquiler obligatorio")
+        item = EventVehicle(type="rental", name=payload.name.strip(), plate=payload.plate.strip().upper(), notes=payload.notes)
+    await db.events.update_one({"id": eid}, {"$push": {"vehicles": item.model_dump()}})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.delete("/events/{eid}/vehicles/{vid}")
+async def remove_event_vehicle(eid: str, vid: str):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("status") == "cerrado":
+        raise HTTPException(400, "Evento cerrado")
+    await db.events.update_one({"id": eid}, {"$pull": {"vehicles": {"id": vid}}})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
 @api_router.post("/events/{eid}/close")
 async def close_event(eid: str):
     await db.events.update_one({"id": eid}, {"$set": {"status": "cerrado"}})
@@ -1061,77 +1241,120 @@ async def apply_pack(eid: str, pid: str):
 # ---------- Incidents ----------
 @api_router.post("/incidents")
 async def create_incident(payload: IncidentCreate):
-    u = await db.units.find_one({"id": payload.unit_id}, PROJ)
-    if not u:
-        raise HTTPException(404, "Unit not found")
-    # ensure unit is not blocked in any event
-    async for ev in db.events.find({}, PROJ):
-        for em in ev.get("materials", []):
-            for unit in em.get("units", []):
-                if unit["unit_id"] == payload.unit_id:
-                    raise HTTPException(400, "Unidad bloqueada en evento. Libera primero.")
-    await db.units.update_one({"id": payload.unit_id}, {"$set": {"status": payload.status}})
-    log = IncidentLog(
-        unit_id=payload.unit_id, type="report", status=payload.status,
-        description=payload.description, files=payload.files,
-    )
+    if not payload.unit_id and not payload.vehicle_id:
+        raise HTTPException(400, "unit_id o vehicle_id requerido")
+    if payload.unit_id and payload.vehicle_id:
+        raise HTTPException(400, "Solo unit_id o vehicle_id, no ambos")
+    if payload.unit_id:
+        u = await db.units.find_one({"id": payload.unit_id}, PROJ)
+        if not u:
+            raise HTTPException(404, "Unit not found")
+        async for ev in db.events.find({}, PROJ):
+            for em in ev.get("materials", []):
+                for unit in em.get("units", []):
+                    if unit["unit_id"] == payload.unit_id:
+                        raise HTTPException(400, "Unidad bloqueada en evento. Libera primero.")
+        await db.units.update_one({"id": payload.unit_id}, {"$set": {"status": payload.status}})
+        log = IncidentLog(unit_id=payload.unit_id, type="report", status=payload.status,
+                          description=payload.description, files=payload.files)
+    else:
+        v = await db.vehicles.find_one({"id": payload.vehicle_id}, PROJ)
+        if not v:
+            raise HTTPException(404, "Vehicle not found")
+        # ensure not used in any future open event
+        async for ev in db.events.find({"status": "abierto"}, PROJ):
+            for ovh in ev.get("vehicles", []):
+                if ovh.get("type") == "owned" and ovh.get("vehicle_id") == payload.vehicle_id:
+                    raise HTTPException(400, f"Vehículo asignado al evento '{ev.get('name','')}'. Quítalo primero.")
+        await db.vehicles.update_one({"id": payload.vehicle_id}, {"$set": {"status": payload.status}})
+        log = IncidentLog(vehicle_id=payload.vehicle_id, type="report", status=payload.status,
+                          description=payload.description, files=payload.files)
     await db.incident_logs.insert_one(log.model_dump())
     return log
 
 
 @api_router.get("/incidents")
 async def list_incidents():
-    """Returns units currently in broken/repair status, with their latest log."""
-    units = await db.units.find({"status": {"$in": ["broken", "repair"]}}, PROJ).to_list(2000)
+    """Returns units + vehicles currently in broken/repair status, with their latest log."""
     out = []
+    units = await db.units.find({"status": {"$in": ["broken", "repair"]}}, PROJ).to_list(2000)
     for u in units:
         m = await db.materials.find_one({"id": u["material_id"]}, PROJ)
         latest = await db.incident_logs.find({"unit_id": u["id"]}, PROJ).sort("created_at", -1).to_list(1)
         out.append({
+            "kind": "unit",
             "unit": u,
             "material": {"id": m["id"], "name": m["name"], "category": m["category"], "reference": m["reference"]} if m else None,
+            "latest": latest[0] if latest else None,
+        })
+    vehicles = await db.vehicles.find({"status": {"$in": ["broken", "repair"]}}, PROJ).to_list(500)
+    for v in vehicles:
+        latest = await db.incident_logs.find({"vehicle_id": v["id"]}, PROJ).sort("created_at", -1).to_list(1)
+        out.append({
+            "kind": "vehicle",
+            "vehicle": v,
             "latest": latest[0] if latest else None,
         })
     return out
 
 
 @api_router.get("/incident-logs")
-async def list_incident_logs(unit_id: Optional[str] = None, material_id: Optional[str] = None, type: Optional[str] = None):
-    """Flat list of all incident logs with material info, optionally filtered."""
+async def list_incident_logs(unit_id: Optional[str] = None, material_id: Optional[str] = None,
+                             vehicle_id: Optional[str] = None, type: Optional[str] = None):
+    """Flat list of all incident logs with material/vehicle info, optionally filtered."""
     q = {}
-    if unit_id:
-        q["unit_id"] = unit_id
     if type:
         q["type"] = type
-    if material_id:
+    if vehicle_id:
+        q["vehicle_id"] = vehicle_id
+    elif unit_id:
+        q["unit_id"] = unit_id
+    elif material_id:
         unit_ids = [u["id"] for u in await db.units.find({"material_id": material_id}, PROJ).to_list(5000)]
         q["unit_id"] = {"$in": unit_ids}
     logs = await db.incident_logs.find(q, PROJ).sort("created_at", -1).to_list(2000)
-    # enrich with unit + material info
     cache_units: Dict[str, dict] = {}
     cache_mats: Dict[str, dict] = {}
+    cache_vehs: Dict[str, dict] = {}
     for log in logs:
-        uid = log.get("unit_id")
-        u = cache_units.get(uid)
-        if u is None:
-            u = await db.units.find_one({"id": uid}, PROJ)
-            cache_units[uid] = u or {}
-        log["unit"] = {"id": u.get("id"), "reference": u.get("reference"), "status": u.get("status")} if u else None
-        mid = u.get("material_id") if u else None
-        if mid:
-            m = cache_mats.get(mid)
-            if m is None:
-                m = await db.materials.find_one({"id": mid}, PROJ)
-                cache_mats[mid] = m or {}
-            log["material"] = {"id": m.get("id"), "name": m.get("name"), "category": m.get("category"), "reference": m.get("reference")} if m else None
-        else:
+        if log.get("vehicle_id"):
+            vid = log["vehicle_id"]
+            v = cache_vehs.get(vid)
+            if v is None:
+                v = await db.vehicles.find_one({"id": vid}, PROJ)
+                cache_vehs[vid] = v or {}
+            log["vehicle"] = {"id": v.get("id"), "name": v.get("name"), "plate": v.get("plate")} if v else None
+            log["unit"] = None
             log["material"] = None
+        else:
+            uid = log.get("unit_id")
+            u = cache_units.get(uid)
+            if u is None:
+                u = await db.units.find_one({"id": uid}, PROJ)
+                cache_units[uid] = u or {}
+            log["unit"] = {"id": u.get("id"), "reference": u.get("reference"), "status": u.get("status")} if u else None
+            mid = u.get("material_id") if u else None
+            if mid:
+                m = cache_mats.get(mid)
+                if m is None:
+                    m = await db.materials.find_one({"id": mid}, PROJ)
+                    cache_mats[mid] = m or {}
+                log["material"] = {"id": m.get("id"), "name": m.get("name"), "category": m.get("category"), "reference": m.get("reference")} if m else None
+            else:
+                log["material"] = None
+            log["vehicle"] = None
     return logs
 
 
 @api_router.get("/units/{unit_id}/history")
 async def unit_history(unit_id: str):
     logs = await db.incident_logs.find({"unit_id": unit_id}, PROJ).sort("created_at", -1).to_list(500)
+    return logs
+
+
+@api_router.get("/vehicles/{vid}/history")
+async def vehicle_history(vid: str):
+    logs = await db.incident_logs.find({"vehicle_id": vid}, PROJ).sort("created_at", -1).to_list(500)
     return logs
 
 
@@ -1143,6 +1366,20 @@ async def resolve_incident(unit_id: str, payload: IncidentResolve):
     await db.units.update_one({"id": unit_id}, {"$set": {"status": "available"}})
     log = IncidentLog(
         unit_id=unit_id, type="resolve", status="available",
+        description=payload.description, files=payload.files,
+    )
+    await db.incident_logs.insert_one(log.model_dump())
+    return log
+
+
+@api_router.post("/vehicle-incidents/{vid}/resolve")
+async def resolve_vehicle_incident(vid: str, payload: IncidentResolve):
+    v = await db.vehicles.find_one({"id": vid}, PROJ)
+    if not v:
+        raise HTTPException(404, "Vehicle not found")
+    await db.vehicles.update_one({"id": vid}, {"$set": {"status": "available"}})
+    log = IncidentLog(
+        vehicle_id=vid, type="resolve", status="available",
         description=payload.description, files=payload.files,
     )
     await db.incident_logs.insert_one(log.model_dump())
@@ -1286,11 +1523,11 @@ def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
                 story.append(Paragraph(cat_label, ParagraphStyle(
                     "cat", parent=body, fontSize=11, textColor=colors.HexColor("#111827"),
                     spaceBefore=4, spaceAfter=2, fontName="Helvetica-Bold")))
-                for m in sorted(by_cat[cat], key=lambda x: x.get("reference") or x["name"]):
-                    units = m.get("units", [])
-                    head = f"<b>{m.get('reference','') + ' · ' if m.get('reference') else ''}{m['name']}</b> &nbsp;<font color='#78716c'>x{len(units)}</font>"
-                    story.append(Paragraph(head, ParagraphStyle("ml", parent=body, fontSize=10, spaceBefore=3, spaceAfter=1)))
-                    if cat_has_unit_refs:
+                if cat_has_unit_refs:
+                    for m in sorted(by_cat[cat], key=lambda x: x.get("reference") or x["name"]):
+                        units = m.get("units", [])
+                        head = f"<b>{m.get('reference','') + ' · ' if m.get('reference') else ''}{m['name']}</b> &nbsp;<font color='#78716c'>x{len(units)}</font>"
+                        story.append(Paragraph(head, ParagraphStyle("ml", parent=body, fontSize=10, spaceBefore=3, spaceAfter=1)))
                         for u in units:
                             story.append(Paragraph(f"&nbsp;&nbsp;• <font face='Courier' size=9 color='#b45309'>{u['reference']}</font>",
                                                    ParagraphStyle("ul", parent=body, fontSize=10, leftIndent=12)))
@@ -1302,20 +1539,31 @@ def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
                                     story.append(Paragraph(f"↳ <font face='Courier' color='#b45309'>({ref})</font> [{resolved}] <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
                                 else:
                                     story.append(Paragraph(f"↳ {s.get('name','')} <font color='#78716c'>x{s.get('qty',1)}</font>", sub_body))
-                    else:
-                        # group by flightcase for non-unit-ref categories (cables)
-                        fc_counts: Dict[str, int] = {}
-                        for u in units:
+                else:
+                    # No-unit-ref categories (cables): group by flightcase first, then by material
+                    fc_groups: Dict[str, Dict[str, dict]] = {}
+                    for m in by_cat[cat]:
+                        for u in m.get("units", []):
                             fc = u.get("flightcase") or ""
-                            fc_counts[fc] = fc_counts.get(fc, 0) + 1
-                        if len(fc_counts) > 1 or (len(fc_counts) == 1 and "" not in fc_counts):
-                            for fc_name in sorted(fc_counts.keys(), key=lambda x: (x == "", x)):
-                                qty = fc_counts[fc_name]
-                                label = fc_name if fc_name else "Sin flightcase"
-                                story.append(Paragraph(
-                                    f"&nbsp;&nbsp;• <font color='#57534e'>{label}</font> <font color='#78716c'>x{qty}</font>",
-                                    ParagraphStyle("fc", parent=body, fontSize=10, leftIndent=12),
-                                ))
+                            mat_key = m.get("reference") or m["name"]
+                            fc_groups.setdefault(fc, {}).setdefault(mat_key, {"name": m["name"], "reference": m.get("reference",""), "qty": 0})
+                            fc_groups[fc][mat_key]["qty"] += 1
+                    fc_keys = sorted(fc_groups.keys(), key=lambda x: (x == "", x))
+                    for fc_name in fc_keys:
+                        label = fc_name if fc_name else "Sin flightcase"
+                        story.append(Paragraph(
+                            f"<b>{label}</b>",
+                            ParagraphStyle("fch", parent=body, fontSize=10, spaceBefore=4, spaceAfter=2,
+                                           textColor=colors.HexColor("#3730a3"), fontName="Helvetica-Bold",
+                                           leftIndent=6),
+                        ))
+                        for mat_key in sorted(fc_groups[fc_name].keys()):
+                            mm = fc_groups[fc_name][mat_key]
+                            ref_label = (mm["reference"] + " · ") if mm["reference"] else ""
+                            story.append(Paragraph(
+                                f"&nbsp;&nbsp;• {ref_label}{mm['name']} <font color='#78716c'>x{mm['qty']}</font>",
+                                ParagraphStyle("fci", parent=body, fontSize=10, leftIndent=16),
+                            ))
 
     rentals = event.get("rentals", [])
     if rentals:
@@ -1334,7 +1582,25 @@ def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
         ]))
         story.append(t)
 
-    if not materials and not rentals:
+    vehicles = event.get("vehicles", [])
+    if vehicles:
+        story.append(Paragraph("Vehículos", h2))
+        rows = [["Tipo", "Matrícula", "Nombre", "Notas"]]
+        for v in vehicles:
+            tipo = "Propio" if v.get("type") == "owned" else "Alquiler"
+            rows.append([tipo, v.get("plate") or "—", v.get("name") or "—", v.get("notes") or ""])
+        t = Table(rows, colWidths=[2.5 * cm, 3 * cm, 6 * cm, 4.5 * cm])
+        t.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, -1), "Helvetica", 10),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 10),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e0e7ff")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+        ]))
+        story.append(t)
+
+    if not materials and not rentals and not vehicles:
         story.append(Spacer(1, 12))
         story.append(Paragraph("Sin material asignado.", body))
 
