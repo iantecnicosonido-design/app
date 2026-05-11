@@ -3390,6 +3390,28 @@ def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
         story.append(Paragraph("Notas", h2))
         story.append(Paragraph(event["notes"].replace("\n", "<br/>"), body))
 
+    contacts = event.get("contacts") or []
+    if contacts:
+        story.append(Paragraph("Contactos del evento", h2))
+        rows = [["Nombre", "Rol / cargo", "Teléfono", "Email"]]
+        for c in contacts:
+            rows.append([
+                c.get("name") or "—",
+                c.get("role") or "—",
+                c.get("phone") or "—",
+                c.get("email") or "—",
+            ])
+        ct = Table(rows, colWidths=[4.5 * cm, 4 * cm, 3.5 * cm, 4 * cm])
+        ct.setStyle(TableStyle([
+            ("FONT", (0, 0), (-1, -1), "Helvetica", 10),
+            ("FONT", (0, 0), (-1, 0), "Helvetica-Bold", 10),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#fef3c7")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#e5e7eb")),
+        ]))
+        story.append(ct)
+
     materials = event.get("materials", [])
     if materials:
         story.append(Paragraph("Material bloqueado del stock", h2))
