@@ -131,6 +131,18 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - **Documentación**: `Event.documents: List` con `{id, category, file, notes, uploaded_by, uploaded_at}`. Categorías: `hoja_ruta | rider | contrarider | implantacion | otros`. Endpoints POST `/events/{eid}/documents` (productor) y DELETE `/events/{eid}/documents/{did}` (productor). UI: lista agrupada por categoría con botón "Abrir" y eliminar. Visible para todos los roles con acceso al evento.
   - Componente: `/app/frontend/src/components/EventBoloSections.jsx` exporta `ContactsSection` y `DocumentsSection`.
 
+- ✅ **Presupuesto + Factura del evento + Rol/Funciones por técnico (Feb 2026)**:
+  - Nuevos campos Event: `event_budget`, `event_invoice` (PDF único cada uno).
+  - Endpoints `POST/DELETE /events/{eid}/budget` y `/invoice` (productor; bolo o alquiler).
+  - `_scrub_invoices()` extendido: ahora oculta también `event_budget`, `event_invoice`, `tech_notes` y `tech_functions` a no-productores. Técnicos solo ven su propia entrada en `tech_notes` y `tech_functions`.
+  - Nuevos campos Event: `tech_roles: Dict[str,str]` (visible a productor + propio tec + otros tecs del bolo) y `tech_functions: Dict[str,str]` (privada, productor + propio tec).
+  - `TechAssignmentRequest` extendido: acepta `tech_roles` y `tech_functions`.
+  - Frontend:
+    - `EventFinanceDocs.jsx`: 2 cards (Presupuesto verde, Factura marrón) en cabecera del evento. Solo PDF. Badge "SOLO PRODUCTOR". Subir, reemplazar, abrir y eliminar.
+    - Diálogo de asignar técnicos extendido: por cada técnico marcado muestra inputs Rol (corto), Funciones (largo) y Nota privada.
+    - Chip del técnico muestra badge con su rol (visible a todos).
+    - Para el técnico logueado: banner verde "Mi rol y funciones" y banner amarillo "Nota privada del productor" si existen.
+
 ## Backlog
 ### P1
 - Favicon (convertir `/app/frontend/public/logo.png` a 32x32 favicon.ico)

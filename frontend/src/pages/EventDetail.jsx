@@ -14,6 +14,7 @@ import { CheckDialog } from "../components/CheckDialog";
 import DuplicateMaterialDialog from "../components/DuplicateMaterialDialog";
 import InvoicesSection from "../components/InvoicesSection";
 import { ContactsSection, DocumentsSection } from "../components/EventBoloSections";
+import EventFinanceDocs from "../components/EventFinanceDocs";
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
@@ -66,6 +67,8 @@ export default function EventDetail() {
   const [techOpen, setTechOpen] = useState(false);
   const [techSel, setTechSel] = useState([]);
   const [techNotes, setTechNotes] = useState({}); // {tid: note}
+  const [techRoles, setTechRoles] = useState({});
+  const [techFunctions, setTechFunctions] = useState({});
   const [techResponsible, setTechResponsible] = useState(null);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
@@ -441,6 +444,11 @@ export default function EventDetail() {
         </div>
       </div>
 
+      {/* Presupuesto + Factura (solo productor, bolo/alquiler) */}
+      {user?.role === "productor" && (ev.type === "bolo" || ev.type === "alquiler") && (
+        <EventFinanceDocs event={ev} onChanged={load} />
+      )}
+
       {/* Tech acceptance banner (only for assigned techs with pending/declined status) */}
       {user?.role === "tecnico" && (ev.assigned_technicians || []).includes(user.id) && (() => {
         const myStatus = (ev.tech_status || {})[user.id] || "pendiente";
@@ -653,7 +661,7 @@ export default function EventDetail() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}><UsersIcon size={18} /> Técnicos asignados</h3>
           {canEditFicha && !isClosed && (
-            <Button size="sm" onClick={() => { setTechSel(ev.assigned_technicians || []); setTechNotes(ev.tech_notes || {}); setTechResponsible(ev.responsible_technician_id || null); setTechOpen(true); }} style={{ background: "var(--accent)" }} data-testid="assign-tech-btn"><UserPlus size={14} /> Asignar</Button>
+            <Button size="sm" onClick={() => { setTechSel(ev.assigned_technicians || []); setTechNotes(ev.tech_notes || {}); setTechRoles(ev.tech_roles || {}); setTechFunctions(ev.tech_functions || {}); setTechResponsible(ev.responsible_technician_id || null); setTechOpen(true); }} style={{ background: "var(--accent)" }} data-testid="assign-tech-btn"><UserPlus size={14} /> Asignar</Button>
           )}
         </div>
         {(ev.assigned_technicians || []).length === 0 ? (
@@ -666,12 +674,14 @@ export default function EventDetail() {
               const isResp = ev.responsible_technician_id === tid;
               const tstatus = (ev.tech_status || {})[tid] || "pendiente";
               const reason = (ev.tech_decline_reason || {})[tid] || "";
+              const trole = (ev.tech_roles || {})[tid] || "";
               const statusBg = tstatus === "aceptado" ? "#dcfce7" : tstatus === "rechazado" ? "#fee2e2" : "#fef3c7";
               const statusColor = tstatus === "aceptado" ? "#166534" : tstatus === "rechazado" ? "#991b1b" : "#92400e";
               return (
                 <span key={tid} style={{ padding: "6px 12px", borderRadius: 999, background: isResp ? "#fef9c3" : "#f5f5f4", border: "1px solid var(--line)", color: "var(--ink)", fontSize: 13, fontWeight: 500, display: "inline-flex", alignItems: "center", gap: 6 }} title={reason ? `Motivo: ${reason}` : (isResp ? "Responsable del evento" : "")}>
                   {isResp && <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", letterSpacing: "0.06em" }}>★</span>}
                   {displayName}
+                  {trole && <span style={{ fontSize: 10, padding: "1px 8px", borderRadius: 999, background: "var(--accent)", color: "#fff", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>{trole}</span>}
                   {t?.phone && <span style={{ fontSize: 11, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace" }}>· {t.phone}</span>}
                   <span style={{ marginLeft: 4, padding: "1px 8px", borderRadius: 999, background: statusBg, color: statusColor, fontSize: 9, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>
                     {tstatus}
@@ -679,6 +689,18 @@ export default function EventDetail() {
                 </span>
               );
             })}
+          </div>
+        )}
+        {/* Private role/functions and note shown only to the logged-in technician */}
+        {user?.role === "tecnico" && (ev.tech_roles?.[user.id] || ev.tech_functions?.[user.id]) && (
+          <div style={{ marginTop: 12, padding: 12, borderLeft: "3px solid var(--good)", background: "#f0fdf4", borderRadius: 6 }} data-testid="my-tech-functions">
+            <div style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.1em", color: "#166534", marginBottom: 4 }}>Mi rol y funciones</div>
+            {ev.tech_roles?.[user.id] && (
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#166534", marginBottom: 6 }}>{ev.tech_roles[user.id]}</div>
+            )}
+            {ev.tech_functions?.[user.id] && (
+              <div style={{ fontSize: 13, color: "#166534", whiteSpace: "pre-wrap" }}>{ev.tech_functions[user.id]}</div>
+            )}
           </div>
         )}
         {/* Private note shown only to the logged-in technician (if exists) */}
@@ -934,13 +956,28 @@ export default function EventDetail() {
                     </label>
                   </div>
                   {checked && (
-                    <Textarea
-                      placeholder="Nota privada para este técnico (opcional). Se incluye en el email de asignación."
-                      value={techNotes[t.id] || ""}
-                      onChange={(e) => setTechNotes({ ...techNotes, [t.id]: e.target.value })}
-                      data-testid={`tech-note-${t.email}`}
-                      style={{ marginTop: 8, minHeight: 60, fontSize: 13 }}
-                    />
+                    <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                      <Input
+                        placeholder="Rol (corto, lo verán los demás técnicos del bolo) — ej.: Audio FOH"
+                        value={techRoles[t.id] || ""}
+                        onChange={(e) => setTechRoles({ ...techRoles, [t.id]: e.target.value })}
+                        data-testid={`tech-role-${t.email}`}
+                      />
+                      <Textarea
+                        placeholder="Funciones (detalle, solo lo ve este técnico) — ej.: Mezcla FOH, monitores in-ear de la banda, gestión del wireless..."
+                        value={techFunctions[t.id] || ""}
+                        onChange={(e) => setTechFunctions({ ...techFunctions, [t.id]: e.target.value })}
+                        data-testid={`tech-functions-${t.email}`}
+                        style={{ minHeight: 60, fontSize: 13 }}
+                      />
+                      <Textarea
+                        placeholder="Nota privada para este técnico (opcional). Se incluye en el email de asignación."
+                        value={techNotes[t.id] || ""}
+                        onChange={(e) => setTechNotes({ ...techNotes, [t.id]: e.target.value })}
+                        data-testid={`tech-note-${t.email}`}
+                        style={{ minHeight: 50, fontSize: 13 }}
+                      />
+                    </div>
                   )}
                 </div>
               );

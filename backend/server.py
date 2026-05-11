@@ -309,6 +309,10 @@ class Event(BaseModel):
     assigned_technicians: List[str] = []
     responsible_technician_id: Optional[str] = None
     tech_notes: Dict[str, str] = Field(default_factory=dict)
+    # Rol corto del técnico en este evento (visible a productor + propio tec + otros tecs asignados)
+    tech_roles: Dict[str, str] = Field(default_factory=dict)
+    # Funciones detalladas del técnico (visible solo a productor + propio tec)
+    tech_functions: Dict[str, str] = Field(default_factory=dict)
     # Estado de aceptación por técnico: {tech_id: "pendiente"|"aceptado"|"rechazado"}
     tech_status: Dict[str, str] = Field(default_factory=dict)
     # Razón de rechazo opcional por técnico: {tech_id: motivo}
@@ -322,6 +326,9 @@ class Event(BaseModel):
     contacts: List[Dict[str, Any]] = []
     # Documentos del bolo (solo bolos): hoja_ruta | rider | contrarider | implantacion | otros
     documents: List[Dict[str, Any]] = []
+    # Presupuesto y factura del evento (PDF único cada uno, productor only)
+    event_budget: Optional[Dict[str, Any]] = None
+    event_invoice: Optional[Dict[str, Any]] = None
     prep_status: Literal["pendiente", "preparado"] = "pendiente"
     prep_checks: List[str] = []  # unit ids marked as prepared by almacen
     prep_locked_at: Optional[str] = None
@@ -568,6 +575,8 @@ class TechAssignmentRequest(BaseModel):
     assigned_technicians: List[str] = []
     responsible_technician_id: Optional[str] = None
     tech_notes: Optional[Dict[str, str]] = None
+    tech_roles: Optional[Dict[str, str]] = None
+    tech_functions: Optional[Dict[str, str]] = None
 
 
 # ---------- Helpers ----------
@@ -969,10 +978,10 @@ async def delete_provider(pid: str, _u: dict = Depends(require_warehouse)):
 
 # ---------- Events ----------
 def _scrub_invoices(ev: dict, user: dict) -> dict:
-    """Hide invoices fields based on user role.
+    """Hide invoices/budget/private fields based on user role.
     - productor: ve todo
-    - almacen/taller: no ve nada de facturas
-    - tecnico: solo ve sus propias tech_invoices, nada de rental_invoices
+    - almacen/taller: no ve facturas, presupuesto/factura, ni tech_notes ni tech_functions
+    - tecnico: solo ve sus propias tech_invoices, tech_notes y tech_functions; NO ve rental_invoices ni budget/invoice del evento
     """
     if not ev:
         return ev
@@ -984,9 +993,20 @@ def _scrub_invoices(ev: dict, user: dict) -> dict:
         my_id = user.get("id")
         ev["tech_invoices"] = [inv for inv in (ev.get("tech_invoices") or []) if inv.get("tech_id") == my_id]
         ev["rental_invoices"] = []
+        ev["event_budget"] = None
+        ev["event_invoice"] = None
+        # tech_notes y tech_functions: solo la suya
+        notes = ev.get("tech_notes") or {}
+        funcs = ev.get("tech_functions") or {}
+        ev["tech_notes"] = {my_id: notes[my_id]} if my_id in notes else {}
+        ev["tech_functions"] = {my_id: funcs[my_id]} if my_id in funcs else {}
     else:
         ev["tech_invoices"] = []
         ev["rental_invoices"] = []
+        ev["event_budget"] = None
+        ev["event_invoice"] = None
+        ev["tech_notes"] = {}
+        ev["tech_functions"] = {}
     return ev
 
 
@@ -2690,6 +2710,16 @@ async def assign_technicians(eid: str, payload: TechAssignmentRequest, user: dic
     else:
         existing_notes = prev.get("tech_notes") or {}
         update["tech_notes"] = {tid: n for tid, n in existing_notes.items() if tid in tech_ids}
+    if payload.tech_roles is not None:
+        update["tech_roles"] = {tid: r for tid, r in payload.tech_roles.items() if tid in tech_ids}
+    else:
+        existing = prev.get("tech_roles") or {}
+        update["tech_roles"] = {tid: r for tid, r in existing.items() if tid in tech_ids}
+    if payload.tech_functions is not None:
+        update["tech_functions"] = {tid: f for tid, f in payload.tech_functions.items() if tid in tech_ids}
+    else:
+        existing = prev.get("tech_functions") or {}
+        update["tech_functions"] = {tid: f for tid, f in existing.items() if tid in tech_ids}
     # tech_status: conserva el estado de los técnicos que continúan, marca PENDIENTE a los nuevos
     prev_status = prev.get("tech_status") or {}
     new_status: Dict[str, str] = {}
@@ -2944,6 +2974,60 @@ async def delete_rental_invoice(eid: str, iid: str, user: dict = Depends(require
     if not ev:
         raise HTTPException(404, "Event not found")
     await db.events.update_one({"id": eid}, {"$pull": {"rental_invoices": {"id": iid}}})
+    return {"ok": True}
+
+
+# ---------- Budget & Invoice (PDF único cada uno, productor only) ----------
+class SingleFileUpload(BaseModel):
+    file: ExpenseFile
+
+
+def _ensure_bolo_or_alquiler(ev: dict):
+    if ev.get("type") not in ("bolo", "alquiler"):
+        raise HTTPException(400, "Solo disponible en bolos o alquileres")
+
+
+@api_router.post("/events/{eid}/budget")
+async def set_event_budget(eid: str, payload: SingleFileUpload, user: dict = Depends(require_role("productor"))):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    _ensure_bolo_or_alquiler(ev)
+    data = {
+        **payload.file.model_dump(),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_by": user["id"],
+        "uploaded_by_name": user.get("name") or user.get("email", ""),
+    }
+    await db.events.update_one({"id": eid}, {"$set": {"event_budget": data}})
+    return data
+
+
+@api_router.delete("/events/{eid}/budget")
+async def delete_event_budget(eid: str, user: dict = Depends(require_role("productor"))):
+    await db.events.update_one({"id": eid}, {"$set": {"event_budget": None}})
+    return {"ok": True}
+
+
+@api_router.post("/events/{eid}/invoice")
+async def set_event_invoice(eid: str, payload: SingleFileUpload, user: dict = Depends(require_role("productor"))):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    _ensure_bolo_or_alquiler(ev)
+    data = {
+        **payload.file.model_dump(),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_by": user["id"],
+        "uploaded_by_name": user.get("name") or user.get("email", ""),
+    }
+    await db.events.update_one({"id": eid}, {"$set": {"event_invoice": data}})
+    return data
+
+
+@api_router.delete("/events/{eid}/invoice")
+async def delete_event_invoice(eid: str, user: dict = Depends(require_role("productor"))):
+    await db.events.update_one({"id": eid}, {"$set": {"event_invoice": None}})
     return {"ok": True}
 
 
