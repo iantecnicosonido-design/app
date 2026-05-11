@@ -12,6 +12,7 @@ import { DeliveryDialog } from "../components/DeliveryDialog";
 import { ReturnDialog } from "../components/ReturnDialog";
 import { CheckDialog } from "../components/CheckDialog";
 import DuplicateMaterialDialog from "../components/DuplicateMaterialDialog";
+import InvoicesSection from "../components/InvoicesSection";
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
@@ -731,6 +732,9 @@ export default function EventDetail() {
       {ev.type === "bolo" && (user?.role === "productor" || (user?.role === "tecnico" && ev.responsible_technician_id === user.id)) && (
         <ExpensesSection eventId={id} canEdit={!isClosed} userRole={user.role} userId={user.id} />
       )}
+
+      {/* Invoices: técnico autónomo asignado puede subir su factura; productor las ve todas + facturas de alquileres */}
+      <InvoicesSection event={ev} user={user} onChanged={load} />
 
       {/* Delivery/Return panel (alquileres only) */}
       {ev.type === "alquiler" && (user?.role === "almacen" || user?.role === "productor") && (

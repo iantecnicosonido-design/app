@@ -15,7 +15,7 @@ export default function Users() {
   const [list, setList] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ email: "", password: "", name: "", phone: "", role: "tecnico" });
+  const [form, setForm] = useState({ email: "", password: "", name: "", phone: "", role: "tecnico", autonomo: false });
   const [pwdFor, setPwdFor] = useState(null);
   const [newPwd, setNewPwd] = useState("");
   const [query, setQuery] = useState("");
@@ -31,17 +31,22 @@ export default function Users() {
   };
   useEffect(() => { load(); }, []);
 
-  const startCreate = () => { setEditing(null); setForm({ email: "", password: "", name: "", phone: "", role: "tecnico" }); setOpen(true); };
-  const startEdit = (u) => { setEditing(u); setForm({ email: u.email, password: "", name: u.name, phone: u.phone || "", role: u.role }); setOpen(true); };
+  const startCreate = () => { setEditing(null); setForm({ email: "", password: "", name: "", phone: "", role: "tecnico", autonomo: false }); setOpen(true); };
+  const startEdit = (u) => { setEditing(u); setForm({ email: u.email, password: "", name: u.name, phone: u.phone || "", role: u.role, autonomo: !!u.autonomo }); setOpen(true); };
 
   const submit = async () => {
     if (!form.email.trim()) { toast.error("Email obligatorio"); return; }
     try {
       if (editing) {
-        await api.put(`/users/${editing.id}`, { name: form.name, phone: form.phone, role: form.role });
+        await api.put(`/users/${editing.id}`, { name: form.name, phone: form.phone, role: form.role, autonomo: form.autonomo });
       } else {
         if (form.password.length < 8) { toast.error("Contraseña mínimo 8 caracteres"); return; }
         await api.post("/users", form);
+        if (form.autonomo && form.role === "tecnico") {
+          // set autonomo via update after create (POST /users doesn't accept it)
+          const created = (await api.get("/users")).data.find((x) => x.email.toLowerCase() === form.email.trim().toLowerCase());
+          if (created) await api.put(`/users/${created.id}`, { autonomo: true });
+        }
       }
       toast.success(editing ? "Actualizado" : "Creado");
       setOpen(false); load();
@@ -100,6 +105,7 @@ export default function Users() {
                 {u.name || u.email}
                 {u.id === me?.id && <span style={{ fontSize: 9, padding: "2px 6px", background: "#fef3c7", color: "#92400e", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase" }}>TÚ</span>}
                 {u.protected && <span style={{ fontSize: 9, padding: "2px 6px", background: "#fce7f3", color: "#9d174d", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>INTERNA</span>}
+                {u.autonomo && <span style={{ fontSize: 9, padding: "2px 6px", background: "#fff7ed", color: "#b45309", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>AUTÓNOMO</span>}
               </div>
               <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{u.email}{u.phone ? ` · ${u.phone}` : ""}</div>
             </div>
@@ -136,6 +142,15 @@ export default function Users() {
                 </SelectContent>
               </Select>
             </Lbl>
+            {form.role === "tecnico" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", border: "1px solid var(--line)", borderRadius: 6, cursor: "pointer", background: form.autonomo ? "#fff7ed" : "#fafaf9" }}>
+                <input type="checkbox" checked={form.autonomo} onChange={(e) => setForm({ ...form, autonomo: e.target.checked })} data-testid="user-autonomo" />
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13 }}>Técnico autónomo</div>
+                  <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>Puede subir su factura a los eventos donde está asignado.</div>
+                </div>
+              </label>
+            )}
             {!editing && (
               <Lbl label="Contraseña (mín 8)"><Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="user-password" /></Lbl>
             )}

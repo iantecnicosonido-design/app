@@ -111,6 +111,20 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Items sin stock aparecen en rojo con badge "Faltan N" y se auto-marcan como "sustituir" por defecto
   - Componente: `/app/frontend/src/components/DuplicateMaterialDialog.jsx`
 
+- ✅ **Técnico autónomo + facturas (Feb 2026)**:
+  - Nuevo campo `User.autonomo: bool` (productor lo activa en Usuarios → editar). Badge "AUTÓNOMO" naranja en la lista.
+  - Nuevos campos Event: `tech_invoices: List`, `rental_invoices: List`.
+  - Endpoints:
+    - `POST /events/{eid}/tech-invoices` (rol tecnico + autonomo + asignado al evento) — body `{file, amount?, notes?}`. Notifica productores.
+    - `DELETE /events/{eid}/tech-invoices/{iid}` — productor o el técnico dueño.
+    - `POST /events/{eid}/rental-invoices` (productor) — body `{file, amount?, provider_name?, rental_id?, notes?}`.
+    - `DELETE /events/{eid}/rental-invoices/{iid}` (productor).
+  - `_scrub_invoices()` filtra el contenido de los arrays según rol al devolver eventos:
+    - productor: ve todo
+    - tecnico: ve solo sus propias `tech_invoices`, sin `rental_invoices`
+    - almacen/taller: no ve ninguna factura
+  - Frontend: nuevo componente `InvoicesSection` montado en EventDetail. Para tec autónomo asignado: form de upload + lista de su factura. Para productor: ambas secciones completas con uploader, importe €, proveedor (en alquileres), notas, abrir y eliminar.
+
 ## Backlog
 ### P1
 - Favicon (convertir `/app/frontend/public/logo.png` a 32x32 favicon.ico)

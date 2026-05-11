@@ -314,6 +314,10 @@ class Event(BaseModel):
     # Razón de rechazo opcional por técnico: {tech_id: motivo}
     tech_decline_reason: Dict[str, str] = Field(default_factory=dict)
     expenses: List[Expense] = []
+    # Facturas de técnicos autónomos asignados al evento
+    tech_invoices: List[Dict[str, Any]] = []
+    # Facturas de alquileres (solo productor las sube/ve)
+    rental_invoices: List[Dict[str, Any]] = []
     prep_status: Literal["pendiente", "preparado"] = "pendiente"
     prep_checks: List[str] = []  # unit ids marked as prepared by almacen
     prep_locked_at: Optional[str] = None
@@ -960,12 +964,35 @@ async def delete_provider(pid: str, _u: dict = Depends(require_warehouse)):
 
 
 # ---------- Events ----------
+def _scrub_invoices(ev: dict, user: dict) -> dict:
+    """Hide invoices fields based on user role.
+    - productor: ve todo
+    - almacen/taller: no ve nada de facturas
+    - tecnico: solo ve sus propias tech_invoices, nada de rental_invoices
+    """
+    if not ev:
+        return ev
+    role = user.get("role")
+    if role == "productor":
+        return ev
+    ev = dict(ev)
+    if role == "tecnico":
+        my_id = user.get("id")
+        ev["tech_invoices"] = [inv for inv in (ev.get("tech_invoices") or []) if inv.get("tech_id") == my_id]
+        ev["rental_invoices"] = []
+    else:
+        ev["tech_invoices"] = []
+        ev["rental_invoices"] = []
+    return ev
+
+
 @api_router.get("/events", response_model=List[Event])
 async def list_events(user: dict = Depends(get_current_user)):
     query = {}
     if user.get("role") == "tecnico":
         query = {"assigned_technicians": user["id"]}
-    return await db.events.find(query, PROJ).sort("event_date", 1).to_list(5000)
+    events = await db.events.find(query, PROJ).sort("event_date", 1).to_list(5000)
+    return [_scrub_invoices(ev, user) for ev in events]
 
 
 @api_router.get("/events/similar-by-name")
@@ -1041,7 +1068,7 @@ async def get_event(eid: str, user: dict = Depends(get_current_user)):
         raise HTTPException(404, "Event not found")
     if user.get("role") == "tecnico" and user["id"] not in (ev.get("assigned_technicians") or []):
         raise HTTPException(403, "Sin acceso a este evento")
-    return ev
+    return _scrub_invoices(ev, user)
 
 
 @api_router.post("/events", response_model=Event)
@@ -2831,6 +2858,93 @@ async def delete_expense(eid: str, xid: str, user: dict = Depends(get_current_us
     return {"ok": True}
 
 
+# ---------- Invoices (tech autónomo + rentals) ----------
+class InvoiceCreate(BaseModel):
+    file: ExpenseFile
+    amount: Optional[float] = None
+    notes: str = ""
+    provider_name: str = ""  # solo para rental_invoices
+    rental_id: Optional[str] = None  # opcional para rental_invoices
+
+
+@api_router.post("/events/{eid}/tech-invoices")
+async def add_tech_invoice(eid: str, payload: InvoiceCreate, user: dict = Depends(get_current_user)):
+    """Técnico autónomo asignado sube su factura del evento."""
+    if user.get("role") != "tecnico":
+        raise HTTPException(403, "Solo técnicos pueden subir facturas")
+    if not user.get("autonomo"):
+        raise HTTPException(403, "Solo técnicos autónomos pueden subir facturas")
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if user["id"] not in (ev.get("assigned_technicians") or []):
+        raise HTTPException(403, "No estás asignado a este evento")
+    inv = {
+        "id": str(uuid.uuid4()),
+        "tech_id": user["id"],
+        "tech_name": user.get("name") or user.get("email", ""),
+        "file": payload.file.model_dump(),
+        "amount": payload.amount,
+        "notes": payload.notes,
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.events.update_one({"id": eid}, {"$push": {"tech_invoices": inv}})
+    # Notify productores
+    link = f"/eventos/{eid}"
+    title = f"{inv['tech_name']} ha subido una factura · {ev.get('name','')}"
+    amount_s = f"{inv['amount']} €" if inv.get("amount") is not None else ""
+    msg = f"Factura subida al evento <b>{ev.get('name','')}</b>{(' por valor de <b>' + amount_s + '</b>') if amount_s else ''}."
+    await _notify_productores("tech_invoice_uploaded", title, msg, link)
+    return inv
+
+
+@api_router.delete("/events/{eid}/tech-invoices/{iid}")
+async def delete_tech_invoice(eid: str, iid: str, user: dict = Depends(get_current_user)):
+    """Productor o el técnico dueño pueden eliminar la factura."""
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    inv = next((i for i in (ev.get("tech_invoices") or []) if i.get("id") == iid), None)
+    if not inv:
+        raise HTTPException(404, "Factura no encontrada")
+    if user.get("role") != "productor" and inv.get("tech_id") != user["id"]:
+        raise HTTPException(403, "Sin permiso")
+    await db.events.update_one({"id": eid}, {"$pull": {"tech_invoices": {"id": iid}}})
+    return {"ok": True}
+
+
+@api_router.post("/events/{eid}/rental-invoices")
+async def add_rental_invoice(eid: str, payload: InvoiceCreate, user: dict = Depends(require_role("productor"))):
+    """Productor sube factura de alquiler externo."""
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    inv = {
+        "id": str(uuid.uuid4()),
+        "rental_id": payload.rental_id,
+        "provider_name": payload.provider_name,
+        "file": payload.file.model_dump(),
+        "amount": payload.amount,
+        "notes": payload.notes,
+        "uploaded_by": user["id"],
+        "uploaded_by_name": user.get("name") or user.get("email", ""),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.events.update_one({"id": eid}, {"$push": {"rental_invoices": inv}})
+    return inv
+
+
+@api_router.delete("/events/{eid}/rental-invoices/{iid}")
+async def delete_rental_invoice(eid: str, iid: str, user: dict = Depends(require_role("productor"))):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    await db.events.update_one({"id": eid}, {"$pull": {"rental_invoices": {"id": iid}}})
+    return {"ok": True}
+
+
+
+
 # ---------- Tasks (independent technician calendar items) ----------
 @api_router.get("/tasks")
 async def list_tasks(
@@ -3432,7 +3546,8 @@ def _public_user(u: dict) -> dict:
     return {"id": u["id"], "email": u["email"], "name": u.get("name", ""),
             "phone": u.get("phone", ""),
             "role": u.get("role", "tecnico"), "active": u.get("active", True),
-            "protected": u.get("protected", False)}
+            "protected": u.get("protected", False),
+            "autonomo": u.get("autonomo", False)}
 
 
 @api_router.post("/auth/login")
@@ -3618,6 +3733,8 @@ async def update_user(uid: str, payload: UpdateUserRequest, user: dict = Depends
     if payload.phone is not None:
         upd["phone"] = payload.phone.strip()
     if payload.role is not None:
+        if target.get("protected"):
+            raise HTTPException(400, "No se puede cambiar el rol de una cuenta interna protegida")
         if payload.role not in ROLES:
             raise HTTPException(400, "Rol inválido")
         upd["role"] = payload.role
@@ -3625,7 +3742,11 @@ async def update_user(uid: str, payload: UpdateUserRequest, user: dict = Depends
         # don't allow deactivating yourself
         if uid == user["id"] and payload.active is False:
             raise HTTPException(400, "No puedes desactivarte a ti mismo")
+        if target.get("protected") and payload.active is False:
+            raise HTTPException(400, "No se puede desactivar una cuenta interna protegida")
         upd["active"] = payload.active
+    if payload.autonomo is not None:
+        upd["autonomo"] = bool(payload.autonomo)
     if upd:
         await db.users.update_one({"id": uid}, {"$set": upd})
     return _public_user(await db.users.find_one({"id": uid}, PROJ))

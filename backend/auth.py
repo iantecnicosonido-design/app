@@ -25,6 +25,7 @@ class User(BaseModel):
     role: str = "tecnico"  # productor | almacen | tecnico | taller
     active: bool = True
     protected: bool = False  # cuentas internas (taller, almacen) que no se pueden borrar/desactivar
+    autonomo: bool = False  # si True (y rol=tecnico): puede subir factura a los eventos donde está asignado
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -55,6 +56,7 @@ class UpdateUserRequest(BaseModel):
     phone: Optional[str] = None
     role: Optional[str] = None
     active: Optional[bool] = None
+    autonomo: Optional[bool] = None
 
 
 class ChangePasswordRequest(BaseModel):
