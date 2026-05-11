@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { DeliveryDialog } from "../components/DeliveryDialog";
 import { ReturnDialog } from "../components/ReturnDialog";
+import { CheckDialog } from "../components/CheckDialog";
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
@@ -65,6 +66,7 @@ export default function EventDetail() {
   const [techResponsible, setTechResponsible] = useState(null);
   const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
+  const [checkOpen, setCheckOpen] = useState(false);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -611,6 +613,7 @@ export default function EventDetail() {
 
       <DeliveryDialog open={deliveryOpen} onClose={() => setDeliveryOpen(false)} eventId={id} onSaved={load} />
       <ReturnDialog open={returnOpen} onClose={() => setReturnOpen(false)} event={ev} onSaved={load} />
+      <CheckDialog open={checkOpen} onClose={() => setCheckOpen(false)} event={ev} onSaved={load} />
 
       {/* Block material with search */}
       <Dialog open={matOpen} onOpenChange={(o) => { setMatOpen(o); if (!o) { setPickedMat(null); setSearchQ(""); } }}>
@@ -1182,11 +1185,12 @@ function DeliveryReturnPanel({ ev }) {
   return (
     <div className="card-paper" style={{ marginBottom: 18, border: "1px solid var(--line)" }} data-testid="delivery-return-panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Entrega y devolución</h3>
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Entrega · Devolución · Comprobación</h3>
         <div style={{ display: "flex", gap: 6 }}>
           {!d && <Pill color="#78716c" bg="#f5f5f4" testId="status-pending">Pendiente de entrega</Pill>}
           {d && !r && <Pill color="#3730a3" bg="#e0e7ff" testId="status-delivered">Entregado</Pill>}
-          {r && <Pill color="#166534" bg="#dcfce7" testId="status-returned">Devuelto</Pill>}
+          {r && !ev.check_info && <Pill color="#1e3a8a" bg="#dbeafe" testId="status-returned">Pendiente comprobación</Pill>}
+          {ev.check_info && <Pill color="#166534" bg="#dcfce7" testId="status-checked">Comprobado</Pill>}
         </div>
       </div>
 
@@ -1207,14 +1211,27 @@ function DeliveryReturnPanel({ ev }) {
       )}
 
       {r && (
-        <div style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "#f0fdf4" }}>
+        <div style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "#eff6ff", marginBottom: ev.check_info ? 10 : 0 }}>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 13 }}>
             <div><b style={{ color: "var(--ink-mute)" }}>Fecha devolución:</b><br/>{fmtDt(r.returned_at)}</div>
-            <div><b style={{ color: "var(--ink-mute)" }}>Incidencias abiertas:</b><br/>{r.incidents_opened || 0}</div>
-            <div><b style={{ color: "var(--ink-mute)" }}>Items revisados:</b><br/>{(r.items || []).length}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Faltantes:</b><br/>{(r.items || []).filter((x) => x.status === "missing").length}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Items devueltos:</b><br/>{(r.items || []).filter((x) => x.status === "returned").length}</div>
           </div>
           <div style={{ marginTop: 10 }}>
-            {r.doc_file_id && <Button size="sm" variant="outline" onClick={() => openFile(r.doc_file_id)} data-testid="open-return-pdf"><FileDown size={14} /> PDF devolución</Button>}
+            {r.doc_file_id && <Button size="sm" variant="outline" onClick={() => openFile(r.doc_file_id)} data-testid="open-return-pdf"><FileDown size={14} /> PDF devolución (cliente)</Button>}
+          </div>
+        </div>
+      )}
+
+      {ev.check_info && (
+        <div style={{ padding: 12, border: "1px solid var(--line)", borderRadius: 8, background: "#f0fdf4" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 13 }}>
+            <div><b style={{ color: "var(--ink-mute)" }}>Fecha comprobación:</b><br/>{fmtDt(ev.check_info.checked_at)}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Incidencias abiertas:</b><br/>{ev.check_info.incidents_opened || 0}</div>
+            <div><b style={{ color: "var(--ink-mute)" }}>Items revisados:</b><br/>{(ev.check_info.items || []).length}</div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            {ev.check_info.doc_file_id && <Button size="sm" variant="outline" onClick={() => openFile(ev.check_info.doc_file_id)} data-testid="open-check-pdf"><FileDown size={14} /> PDF comprobación (interno)</Button>}
           </div>
         </div>
       )}

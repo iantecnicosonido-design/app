@@ -51,11 +51,11 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
 - ✅ Tareas independientes en calendario (Feb 2026): nuevo modelo `Task` (transporte / trabajo en nave / visita / otro) con fecha/hora, ubicación, notas, técnicos asignados, evento asociado opcional, archivos adjuntos. Visibles en el calendario de Eventos en chips morados. Productor crea/edita; técnico solo ve las suyas
 - ✅ Apartado Gastos en bolos (Feb 2026): solo accesible para Productor y Técnico Responsable del evento. Cabecera con datos fiscales EDISON RENT SL · B60800301 y mensaje rojo "RECUERDE SOLICITAR FACTURA". Importe manual + adjuntos (archivo o cámara móvil con `capture="environment"`). Total agregado
 - ✅ Técnico Responsable: el productor marca a uno de entre los asignados; mostrado con badge dorado ⭐ en la lista de técnicos del evento; única persona técnica con permiso para añadir gastos
-- ✅ Entrega y Devolución de alquileres simples (Feb 2026):
-  - **Entrega**: modal con fianza opcional + importe, DNI anverso/reverso (solo visible Almacén/Productor), aviso legal con checkbox obligatorio, método de pago (efectivo/tarjeta/transferencia), email cliente opcional, firma del cliente (canvas `react-signature-canvas`). Genera PDF dedicado con bloque legal completo + firma; envía por email si hay address; guarda en evento
-  - **Devolución**: modal 2-step: firma del cliente conforme devuelve, luego revisión item-por-item (OK / NO OK / FALTA). NO OK y FALTA marcan unidad como averiada automáticamente y abren incidencia con texto "Devolución alquiler '[nombre]': dañado/faltante". Genera PDF acta de devolución con resumen + ambas firmas
-  - Panel en el evento muestra estado (Pendiente/Entregado/Devuelto) con descarga directa de PDFs entrega/devolución/DNI
-  - Endpoints: `POST /events/{eid}/delivery`, `POST /events/{eid}/return`, `GET /file-by-id/{fid}`
+- ✅ Entrega + Devolución + Comprobación de alquileres simples (Feb 2026, refactor 3-pasos):
+  - **Entrega**: modal con fianza opcional + importe, DNI anverso/reverso (con captura desde cámara móvil, solo visible internamente), aviso legal completo con casilla obligatoria, método de pago (Efectivo/Tarjeta/Transferencia), email cliente opcional, firma cliente. Genera PDF "RECIBO DE ENTREGA · ALQUILER" con bloque legal + firma; email al cliente si tiene address
+  - **Devolución** (paso intermedio para cliente): firma cliente conforme Edison Rent recibe el material + marcar cada item como **DEVUELTO** o **FALTA**. Items FALTA → unidad averiada + incidencia auto "faltante". Genera PDF "ACTA DE RECEPCIÓN · ALQUILER" con la frase legal "Edison Rent SL declara haber recibido el siguiente material, a la espera de la comprobación de su estado". Se envía por email al cliente automáticamente
+  - **Comprobación** (paso final interno): solo accesible tras devolución. Almacén/Productor marca cada item devuelto como **OK** o **NO OK**. NO OK → unidad averiada + incidencia auto "dañado". Items que ya eran FALTA aparecen en read-only. Genera PDF interno "ACTA DE COMPROBACIÓN · ALQUILER" con resumen OK/NO OK/FALTA
+  - Panel en evento muestra 4 estados (Pendiente entrega / Entregado / Pendiente comprobación / Comprobado) con PDFs descargables de cada paso + DNI
 - ✅ Tests automatizados pasados (24/24 backend, 7/7 frontend)
 
 ## Backlog

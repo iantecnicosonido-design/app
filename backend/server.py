@@ -1912,14 +1912,26 @@ class DeliveryRequest(BaseModel):
 class ReturnItemStatus(BaseModel):
     id: str  # unit_id or rental_id
     kind: Literal["unit", "rental"] = "unit"
-    material_id: Optional[str] = None  # required when kind=unit (parent material in event)
-    status: Literal["ok", "nok", "missing"]
+    material_id: Optional[str] = None
+    status: Literal["returned", "missing"]
     note: str = ""
 
 
 class ReturnRequest(BaseModel):
     signature_file_id: str
     items: List[ReturnItemStatus]
+
+
+class CheckItemStatus(BaseModel):
+    id: str
+    kind: Literal["unit", "rental"] = "unit"
+    material_id: Optional[str] = None
+    status: Literal["ok", "nok"]
+    note: str = ""
+
+
+class CheckRequest(BaseModel):
+    items: List[CheckItemStatus]
 
 
 def _almacen_or_productor(user: dict):
@@ -2049,16 +2061,13 @@ async def submit_return(eid: str, payload: ReturnRequest, user: dict = Depends(g
         "by_user_name": user.get("name") or user.get("email", ""),
     }
 
-    # Apply consequences: nok/missing → mark unit broken + create incident
+    # Missing items at this stage are considered lost → mark broken + incident
     incident_count = 0
     for it in payload.items:
-        if it.kind != "unit":
-            continue
-        if it.status in ("nok", "missing"):
+        if it.kind == "unit" and it.status == "missing":
             await db.units.update_one({"id": it.id}, {"$set": {"status": "broken"}})
             desc = (
-                f"Devolución alquiler '{ev.get('name','')}': "
-                + ("dañado" if it.status == "nok" else "faltante")
+                f"Devolución alquiler '{ev.get('name','')}': faltante"
                 + (f". Nota: {it.note}" if it.note else "")
             )
             log = IncidentLog(
@@ -2069,7 +2078,7 @@ async def submit_return(eid: str, payload: ReturnRequest, user: dict = Depends(g
             incident_count += 1
     return_doc["incidents_opened"] = incident_count
 
-    # Generate PDF
+    # Generate "received pending check" PDF
     delivery_sig_path = await _file_to_temp(delivery.get("signature_file_id"))
     return_sig_path = await _file_to_temp(payload.signature_file_id)
     try:
@@ -2086,27 +2095,109 @@ async def submit_return(eid: str, payload: ReturnRequest, user: dict = Depends(g
     return_doc["doc_name"] = stored["name"]
     await db.events.update_one({"id": eid}, {"$set": {"return_info": return_doc}})
 
-    # Optional email re-send with return PDF
+    # Email PDF to client
     if delivery.get("client_email"):
         try:
             html = render_basic(
-                title="Acta de devolución · Edison Rent",
+                title="Acta de recepción · Edison Rent",
                 body_html=(
                     f"Hola {ev.get('client_name','cliente')},<br><br>"
-                    "Adjuntamos el acta de devolución del material alquilado. "
+                    "Adjuntamos el acta de recepción del material. "
+                    "Edison Rent SL declara haber recibido el siguiente material, "
+                    "a la espera de la comprobación de su estado.<br><br>"
                     "Gracias por confiar en Edison Rent."
                 ),
                 footer="EDISON RENT SL · B60800301",
             )
             await send_email(
                 delivery["client_email"],
-                f"Devolución de material – {ev.get('name','Alquiler')}",
+                f"Recepción de material – {ev.get('name','Alquiler')}",
                 html,
                 attachments=[{"filename": stored["name"], "content": pdf_bytes}],
             )
         except Exception as e:
             logger.error("return email error: %s", e)
 
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/check")
+async def submit_check(eid: str, payload: CheckRequest, user: dict = Depends(get_current_user)):
+    _almacen_or_productor(user)
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("type") != "alquiler":
+        raise HTTPException(400, "Comprobación solo disponible para alquileres simples")
+    if not (ev.get("return_info") or {}).get("returned_at"):
+        raise HTTPException(400, "Primero hay que registrar la devolución")
+    if (ev.get("check_info") or {}).get("checked_at"):
+        raise HTTPException(400, "Comprobación ya registrada")
+
+    # Whitelist of returned item ids (cannot check items declared missing on return)
+    returned_ids = {it["id"] for it in (ev.get("return_info") or {}).get("items", []) if it.get("status") == "returned"}
+    incident_count = 0
+    for it in payload.items:
+        if it.id not in returned_ids:
+            continue
+        if it.kind == "unit" and it.status == "nok":
+            await db.units.update_one({"id": it.id}, {"$set": {"status": "broken"}})
+            desc = (
+                f"Comprobación alquiler '{ev.get('name','')}': dañado"
+                + (f". Nota: {it.note}" if it.note else "")
+            )
+            log = IncidentLog(
+                unit_id=it.id, type="report", status="broken",
+                description=desc, files=[],
+            )
+            await db.incident_logs.insert_one(log.model_dump())
+            incident_count += 1
+
+    checked_at = datetime.now(timezone.utc).isoformat()
+    check_doc: dict = {
+        "checked_at": checked_at,
+        "items": [it.model_dump() for it in payload.items],
+        "incidents_opened": incident_count,
+        "by_user_id": user["id"],
+        "by_user_name": user.get("name") or user.get("email", ""),
+    }
+
+    # Build combined statuses for final PDF (ok / nok / missing)
+    combined: Dict[str, str] = {}
+    notes: Dict[str, str] = {}
+    for it in (ev.get("return_info") or {}).get("items", []):
+        if it.get("status") == "missing":
+            combined[it["id"]] = "missing"
+            if it.get("note"):
+                notes[it["id"]] = it["note"]
+    for it in payload.items:
+        combined[it.id] = it.status  # ok or nok
+        if it.note:
+            notes[it.id] = it.note
+
+    # Generate internal check PDF
+    delivery_sig_path = await _file_to_temp((ev.get("delivery") or {}).get("signature_file_id"))
+    return_sig_path = await _file_to_temp((ev.get("return_info") or {}).get("signature_file_id"))
+    try:
+        check_pdf_doc = {
+            "returned_at": (ev.get("return_info") or {}).get("returned_at"),
+            "items": [{"id": k, "status": v, "note": notes.get(k, "")} for k, v in combined.items()],
+            "incidents_opened": incident_count,
+        }
+        pdf_bytes = build_return_pdf(ev, ev.get("delivery") or {}, check_pdf_doc,
+                                     delivery_sig_path, return_sig_path,
+                                     title="ACTA DE COMPROBACIÓN · ALQUILER")
+    finally:
+        for p in (delivery_sig_path, return_sig_path):
+            if p:
+                try:
+                    os.unlink(p)
+                except Exception:
+                    pass
+    stored = await _store_pdf(eid, pdf_bytes, f"comprobacion_{(ev.get('reference') or ev.get('name','evento')).replace(' ', '_')}.pdf")
+    check_doc["doc_file_id"] = stored["file_id"]
+    check_doc["doc_name"] = stored["name"]
+    await db.events.update_one({"id": eid}, {"$set": {"check_info": check_doc}})
     return await db.events.find_one({"id": eid}, PROJ)
 
 

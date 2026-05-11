@@ -84,7 +84,9 @@ def _signature_image(file_path: Optional[str]) -> Optional[Image]:
 
 def _materials_table(event: dict, body, statuses: Optional[Dict[str, str]] = None,
                      show_status: bool = False) -> Table:
-    """Materials/units table; optionally with status column (ok/nok/missing)."""
+    """Materials/units table; optionally with status column.
+    Status values supported: ok, nok, missing, returned (DEVUELTO).
+    """
     head = ["Categoría", "Material", "Ref.", "Cantidad"]
     if show_status:
         head.append("Estado")
@@ -99,6 +101,19 @@ def _materials_table(event: dict, body, statuses: Optional[Dict[str, str]] = Non
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
     ]
+    label_map = {
+        "ok": "OK",
+        "nok": "NO OK",
+        "missing": "FALTA",
+        "returned": "DEVUELTO",
+    }
+    color_ok = colors.HexColor("#166534")
+    color_nok = colors.HexColor("#991b1b")
+    color_warn = colors.HexColor("#b45309")
+    color_blue = colors.HexColor("#1e3a8a")
+    bg_nok = colors.HexColor("#fee2e2")
+    bg_warn = colors.HexColor("#fef3c7")
+    bg_blue = colors.HexColor("#dbeafe")
     row_idx = 1
     statuses = statuses or {}
     for m in event.get("materials", []):
@@ -109,26 +124,31 @@ def _materials_table(event: dict, body, statuses: Optional[Dict[str, str]] = Non
             cells = [m.get("category", ""), m.get("name", ""), u.get("reference", ""), "1"]
             if show_status:
                 st = statuses.get(u["unit_id"], "ok")
-                cells.append({"ok": "OK", "nok": "NO OK", "missing": "FALTA"}.get(st, st.upper()))
+                cells.append(label_map.get(st, st.upper()))
                 if st == "nok":
-                    style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), colors.HexColor("#fee2e2")))
-                    style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), colors.HexColor("#991b1b")))
+                    style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), bg_nok))
+                    style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), color_nok))
                 elif st == "missing":
-                    style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), colors.HexColor("#fef3c7")))
-                    style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), colors.HexColor("#b45309")))
+                    style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), bg_warn))
+                    style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), color_warn))
+                elif st == "returned":
+                    style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), bg_blue))
+                    style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), color_blue))
                 else:
-                    style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), colors.HexColor("#166534")))
+                    style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), color_ok))
             rows.append(cells)
             row_idx += 1
     for r in event.get("rentals", []):
         cells = ["EXTERNO", r.get("name", ""), r.get("provider_name", "") or "—", str(r.get("quantity", 1))]
         if show_status:
             st = statuses.get(r["id"], "ok")
-            cells.append({"ok": "OK", "nok": "NO OK", "missing": "FALTA"}.get(st, st.upper()))
+            cells.append(label_map.get(st, st.upper()))
             if st == "nok":
-                style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), colors.HexColor("#fee2e2")))
+                style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), bg_nok))
             elif st == "missing":
-                style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), colors.HexColor("#fef3c7")))
+                style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), bg_warn))
+            elif st == "returned":
+                style_cmds.append(("BACKGROUND", (4, row_idx), (4, row_idx), bg_blue))
         rows.append(cells)
         row_idx += 1
     if len(rows) == 1:
@@ -242,17 +262,23 @@ def build_delivery_pdf(event: dict, delivery: dict, signature_path: Optional[str
 
 
 def build_return_pdf(event: dict, delivery: dict, return_info: dict,
-                     delivery_sig_path: Optional[str], return_sig_path: Optional[str]) -> bytes:
-    """Build the return PDF including item statuses (ok / nok / missing)."""
+                     delivery_sig_path: Optional[str], return_sig_path: Optional[str],
+                     title: str = "ACTA DE RECEPCIÓN · ALQUILER") -> bytes:
+    """Build the return PDF.
+    By default this is the "recepción" PDF (returned / missing) that Edison Rent gives to
+    the client after they bring the material back, pending internal check.
+    Pass title="ACTA DE COMPROBACIÓN · ALQUILER" for the final internal check PDF.
+    """
+    is_check = "COMPROBACIÓN" in title.upper()
     buf = BytesIO()
     doc = SimpleDocTemplate(
         buf, pagesize=A4, leftMargin=1.6 * cm, rightMargin=1.6 * cm,
         topMargin=1.2 * cm, bottomMargin=1.6 * cm,
-        title=f"Devolución {event.get('name','')}",
+        title=f"{'Comprobación' if is_check else 'Recepción'} {event.get('name','')}",
     )
     styles = getSampleStyleSheet()
     body = styles["Normal"]
-    story = [_hdr(event, "ACTA DE DEVOLUCIÓN · ALQUILER", body), Spacer(1, 8)]
+    story = [_hdr(event, title, body), Spacer(1, 8)]
 
     delivered_at_fmt = ""
     if delivery.get("delivered_at"):
@@ -276,7 +302,7 @@ def build_return_pdf(event: dict, delivery: dict, return_info: dict,
         ["Cliente", event.get("client_name", "—")],
         ["Referencia", event.get("reference", "") or "—"],
         ["Fecha entrega", delivered_at_fmt or "—"],
-        ["Fecha devolución", returned_at_fmt or "—"],
+        [("Fecha comprobación" if is_check else "Fecha recepción"), returned_at_fmt or "—"],
         ["Fianza", deposit_str],
         ["Método de pago entrega", (delivery.get("payment_method") or "").capitalize() or "—"],
     ]
@@ -295,15 +321,24 @@ def build_return_pdf(event: dict, delivery: dict, return_info: dict,
     statuses: Dict[str, str] = {}
     notes: Dict[str, str] = {}
     for it in return_info.get("items", []):
-        statuses[it.get("id")] = it.get("status", "ok")
+        statuses[it.get("id")] = it.get("status", "returned")
         if it.get("note"):
             notes[it.get("id")] = it["note"]
 
-    story.append(Paragraph(
-        "<b>REVISIÓN DEL MATERIAL DEVUELTO</b>",
-        ParagraphStyle("ttl", parent=body, fontSize=11, textColor=colors.HexColor("#b45309"),
-                       fontName="Helvetica-Bold", spaceAfter=4),
-    ))
+    if not is_check:
+        # Recepción: declaración Edison Rent
+        story.append(Paragraph(
+            "<b>Edison Rent SL declara haber recibido el siguiente material, "
+            "a la espera de la comprobación de su estado:</b>",
+            ParagraphStyle("decl", parent=body, fontSize=10, textColor=colors.HexColor("#1c1917"),
+                           spaceAfter=6, leading=14),
+        ))
+    else:
+        story.append(Paragraph(
+            "<b>REVISIÓN DEL MATERIAL DEVUELTO</b>",
+            ParagraphStyle("ttl", parent=body, fontSize=11, textColor=colors.HexColor("#b45309"),
+                           fontName="Helvetica-Bold", spaceAfter=4),
+        ))
     mat_t = _materials_table(event, body, statuses=statuses, show_status=True)
     if mat_t:
         story.append(mat_t)
@@ -313,12 +348,20 @@ def build_return_pdf(event: dict, delivery: dict, return_info: dict,
     ok_n = sum(1 for s in statuses.values() if s == "ok")
     nok_n = sum(1 for s in statuses.values() if s == "nok")
     miss_n = sum(1 for s in statuses.values() if s == "missing")
-    story.append(Paragraph(
-        f"<b>Resumen:</b> <font color='#166534'>OK: {ok_n}</font> · "
-        f"<font color='#991b1b'>NO OK: {nok_n}</font> · "
-        f"<font color='#b45309'>FALTA: {miss_n}</font>",
-        ParagraphStyle("sum", parent=body, fontSize=10, spaceAfter=6),
-    ))
+    ret_n = sum(1 for s in statuses.values() if s == "returned")
+    if is_check:
+        story.append(Paragraph(
+            f"<b>Resumen:</b> <font color='#166534'>OK: {ok_n}</font> · "
+            f"<font color='#991b1b'>NO OK: {nok_n}</font> · "
+            f"<font color='#b45309'>FALTA: {miss_n}</font>",
+            ParagraphStyle("sum", parent=body, fontSize=10, spaceAfter=6),
+        ))
+    else:
+        story.append(Paragraph(
+            f"<b>Resumen:</b> <font color='#1e3a8a'>DEVUELTO: {ret_n}</font> · "
+            f"<font color='#b45309'>FALTA: {miss_n}</font>",
+            ParagraphStyle("sum", parent=body, fontSize=10, spaceAfter=6),
+        ))
 
     # Notes
     if notes:
@@ -352,8 +395,9 @@ def build_return_pdf(event: dict, delivery: dict, return_info: dict,
     # Signatures: delivery (orig) + return (new)
     d_sig = _signature_image(delivery_sig_path) or Paragraph("(sin firma)", body)
     r_sig = _signature_image(return_sig_path) or Paragraph("(sin firma)", body)
+    sig_right_label = "Firma comprobación (almacén)" if is_check else "Firma recepción (cliente)"
     sigs = Table(
-        [["Firma entrega (cliente)", "Firma devolución (cliente)"],
+        [["Firma entrega (cliente)", sig_right_label],
          [d_sig, r_sig]],
         colWidths=[8.5 * cm, 8.5 * cm],
         rowHeights=[0.6 * cm, 3 * cm],
