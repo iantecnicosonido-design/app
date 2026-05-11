@@ -23,9 +23,11 @@ const fmtDt = (s) => {
 export default function EventDetail() {
   const { user } = useAuth();
   const canEditFicha = can(user, "event_edit_ficha");
-  const canMaterial = can(user, "event_material");
+  const _canMaterial = can(user, "event_material");
   const canClose = can(user, "event_close");
   const { id } = useParams();
+  // canMaterial is dynamic — disabled when prep is locked (only almacén can unlock)
+  // Defined below after we have `ev`.
   const navigate = useNavigate();
   const [ev, setEv] = useState(null);
   const [materials, setMaterials] = useState([]);
@@ -57,6 +59,8 @@ export default function EventDetail() {
   const [technicians, setTechnicians] = useState([]);
   const [techOpen, setTechOpen] = useState(false);
   const [techSel, setTechSel] = useState([]);
+  const [subOpen, setSubOpen] = useState(false);
+  const [subCtx, setSubCtx] = useState(null);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -258,6 +262,78 @@ export default function EventDetail() {
     } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
   };
 
+  // ---------- Preparación (Almacén) ----------
+  const isAlmacen = user?.role === "almacen";
+  const isPrepLocked = ev?.prep_status === "preparado";
+  const canMaterial = _canMaterial && !isPrepLocked;
+
+  const toggleCheck = async (unit_id, currentlyChecked) => {
+    try {
+      const r = await api.post(`/events/${id}/prep/check-unit`, { unit_id, checked: !currentlyChecked });
+      setEv(r.data);
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const openSubstitute = async (material_id, old_unit_id, old_reference) => {
+    try {
+      const r = await api.get(`/events/${id}/availability`, { params: { material_id } });
+      const avail = r.data.units.filter((u) => u.available || u.id === old_unit_id);
+      setSubCtx({ material_id, old_unit_id, old_reference, avail });
+      setSubOpen(true);
+    } catch { toast.error("Error cargando unidades"); }
+  };
+
+  const confirmSubstitute = async (new_unit_id) => {
+    try {
+      const r = await api.post(`/events/${id}/prep/substitute`, {
+        material_id: subCtx.material_id, old_unit_id: subCtx.old_unit_id, new_unit_id,
+      });
+      setEv(r.data); setSubOpen(false); setSubCtx(null);
+      toast.success("Unidad sustituida");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const removeFromPrep = async (material_id, unit_id, reference) => {
+    if (!window.confirm(`¿Quitar la unidad ${reference} del evento?`)) return;
+    try {
+      const r = await api.post(`/events/${id}/prep/remove-unit`, { material_id, unit_id });
+      setEv(r.data);
+      toast.success("Unidad retirada");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const lockPrep = async () => {
+    try {
+      const r = await api.post(`/events/${id}/prep/lock`);
+      setEv(r.data);
+      toast.success("Material bloqueado por Almacén");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  const unlockPrep = async () => {
+    try {
+      const r = await api.post(`/events/${id}/prep/unlock`);
+      setEv(r.data);
+      toast.success("Desbloqueado, ya se puede modificar");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
+  // Flatten all blocked units for prep view
+  const prepRows = (ev?.materials || []).flatMap((m) =>
+    (m.units || []).map((u) => ({
+      material_id: m.material_id,
+      material_name: m.name,
+      material_reference: m.reference,
+      category: m.category,
+      unit_id: u.unit_id,
+      unit_reference: u.reference,
+      flightcase: u.flightcase || "",
+    }))
+  );
+  const prepChecks = new Set(ev?.prep_checks || []);
+  const totalUnits = prepRows.length;
+  const checkedCount = prepRows.filter((r) => prepChecks.has(r.unit_id)).length;
+
   const applyPack = async (pid) => {
     try {
       const r = await api.post(`/events/${id}/apply-pack/${pid}`);
@@ -325,6 +401,16 @@ export default function EventDetail() {
           {canEditFicha && <Button variant="ghost" onClick={deleteEvent}><Trash2 size={16} color="#b91c1c" /></Button>}
         </div>
       </div>
+
+      {isPrepLocked && (
+        <div className="card-paper" style={{ background: "#fef3c7", border: "1px solid #fbbf24", padding: 14, marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }} data-testid="prep-locked-banner">
+          <div>
+            <div style={{ fontWeight: 700, color: "#92400e", display: "flex", alignItems: "center", gap: 8 }}><Lock size={16} /> Material bloqueado por Almacén</div>
+            <div style={{ fontSize: 12, color: "#92400e", marginTop: 2 }}>Preparado por {ev.prep_locked_by_name || "—"} · {ev.prep_locked_at ? new Date(ev.prep_locked_at).toLocaleString("es-ES") : ""}. Nadie puede modificar material/vehículos hasta que Almacén lo desbloquee.</div>
+          </div>
+          {isAlmacen && <Button onClick={unlockPrep} variant="outline" data-testid="prep-unlock-btn"><Unlock size={14} /> Desbloquear</Button>}
+        </div>
+      )}
 
       <div className="card-paper" style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
@@ -443,8 +529,103 @@ export default function EventDetail() {
         )}
       </div>
 
+      {/* Preparación (Almacén) */}
+      <div className="card-paper" style={{ marginBottom: 18, border: isAlmacen ? "2px solid #3730a3" : "1px solid var(--line)" }} data-testid="prep-section">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
+            <Package size={18} /> Preparación de Almacén
+            <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, background: "#e0e7ff", color: "#3730a3", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>solo Almacén edita</span>
+          </h3>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: checkedCount === totalUnits && totalUnits > 0 ? "var(--good)" : "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace" }}>
+              {checkedCount}/{totalUnits} preparado{checkedCount !== 1 ? "s" : ""}
+            </span>
+            {isAlmacen && !isClosed && !isPrepLocked && totalUnits > 0 && (
+              <Button onClick={lockPrep} disabled={checkedCount < totalUnits} style={{ background: checkedCount === totalUnits ? "var(--good)" : "#a8a29e" }} data-testid="prep-lock-btn">
+                <Lock size={14} /> Marcar listo y bloquear
+              </Button>
+            )}
+            {isAlmacen && isPrepLocked && (
+              <Button onClick={unlockPrep} variant="outline" data-testid="prep-unlock-btn-section"><Unlock size={14} /> Desbloquear</Button>
+            )}
+          </div>
+        </div>
+
+        {prepRows.length === 0 ? (
+          <p style={{ color: "var(--ink-mute)", fontSize: 14, margin: 0 }}>Sin material para preparar. El productor o almacén debe añadir material al evento primero.</p>
+        ) : (
+          <div>
+            {(() => {
+              const byCat = {};
+              prepRows.forEach((r) => { (byCat[r.category] ||= []).push(r); });
+              return categories.map((c) => {
+                const rows = byCat[c.key];
+                if (!rows || rows.length === 0) return null;
+                return (
+                  <div key={c.key} style={{ marginBottom: 14 }}>
+                    <div style={{ marginBottom: 6 }}><span className={`cat-pill cat-${c.key}`}>{c.label}</span></div>
+                    {rows.map((r) => {
+                      const checked = prepChecks.has(r.unit_id);
+                      return (
+                        <div key={r.unit_id} className="row-hover" style={{ display: "grid", gridTemplateColumns: "32px 110px 1fr 130px 90px", gap: 8, padding: "8px 6px", borderBottom: "1px solid var(--line)", alignItems: "center", background: checked ? "#dcfce7" : "transparent" }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={!isAlmacen || isPrepLocked}
+                            onChange={() => toggleCheck(r.unit_id, checked)}
+                            data-testid={`prep-check-${r.unit_reference}`}
+                            style={{ width: 18, height: 18, cursor: (isAlmacen && !isPrepLocked) ? "pointer" : "not-allowed" }}
+                          />
+                          <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{r.unit_reference}</span>
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 500, textDecoration: checked ? "line-through" : "none", color: checked ? "var(--ink-mute)" : "inherit" }}>{r.material_name}</div>
+                            {r.flightcase && <div style={{ fontSize: 10, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace" }}>FC: {r.flightcase}</div>}
+                          </div>
+                          <div style={{ textAlign: "center" }}>
+                            {isAlmacen && !isPrepLocked && (
+                              <Button size="sm" variant="ghost" onClick={() => openSubstitute(r.material_id, r.unit_id, r.unit_reference)} title="Sustituir por otra unidad">
+                                Sustituir
+                              </Button>
+                            )}
+                          </div>
+                          <div style={{ textAlign: "right" }}>
+                            {isAlmacen && !isPrepLocked && (
+                              <Button size="icon" variant="ghost" onClick={() => removeFromPrep(r.material_id, r.unit_id, r.unit_reference)} title="Quitar unidad del evento"><Trash2 size={14} /></Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        )}
+
+        {(ev.prep_log || []).length > 0 && (
+          <details style={{ marginTop: 16, paddingTop: 12, borderTop: "1px dashed var(--line)" }}>
+            <summary style={{ cursor: "pointer", fontSize: 11, color: "var(--ink-mute)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "JetBrains Mono, monospace" }}>Registro de cambios ({ev.prep_log.length})</summary>
+            <div style={{ marginTop: 10, maxHeight: 240, overflowY: "auto", fontSize: 12 }}>
+              {[...ev.prep_log].reverse().map((l) => (
+                <div key={l.id} style={{ display: "grid", gridTemplateColumns: "120px 1fr 150px", gap: 8, padding: "4px 0", borderBottom: "1px solid var(--line)", color: "var(--ink-soft)" }}>
+                  <span style={{ fontWeight: 600, fontFamily: "JetBrains Mono, monospace", fontSize: 11, textTransform: "uppercase", color: l.action === "lock" ? "var(--good)" : l.action === "unlock" ? "var(--warn)" : l.action === "substitute" ? "#3730a3" : l.action === "remove_unit" ? "var(--bad)" : "var(--ink-mute)" }}>{l.action}</span>
+                  <span>
+                    {l.action === "substitute" && <>{l.old_reference} → {l.new_reference}</>}
+                    {l.action === "remove_unit" && <>{l.reference}</>}
+                    {(l.action === "check" || l.action === "uncheck") && <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 11 }}>{l.unit_id?.slice(0, 8)}…</span>}
+                    {(l.action === "lock" || l.action === "unlock") && "evento"}
+                  </span>
+                  <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)", textAlign: "right" }}>{l.by_user_name} · {new Date(l.at).toLocaleString("es-ES")}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+
       <div className="card-paper" style={{ marginBottom: 18 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}><UsersIcon size={18} /> Técnicos asignados</h3>
           {canEditFicha && !isClosed && (
             <Button size="sm" onClick={() => { setTechSel(ev.assigned_technicians || []); setTechOpen(true); }} style={{ background: "var(--accent)" }} data-testid="assign-tech-btn"><UserPlus size={14} /> Asignar</Button>
@@ -634,6 +815,42 @@ export default function EventDetail() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setVehOpen(false)}>Cancelar</Button>
             <Button onClick={submitVehicle} style={{ background: "var(--accent)" }} data-testid="confirm-add-vehicle-btn">Añadir</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Substitute unit */}
+      <Dialog open={subOpen} onOpenChange={setSubOpen}>
+        <DialogContent style={{ maxWidth: 560 }} data-testid="substitute-dialog">
+          <DialogHeader><DialogTitle>Sustituir unidad {subCtx?.old_reference}</DialogTitle></DialogHeader>
+          <p style={{ fontSize: 12, color: "var(--ink-mute)", marginBottom: 12 }}>Selecciona la nueva unidad del mismo material que la reemplazará:</p>
+          <div style={{ maxHeight: 380, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 8 }}>
+            {(subCtx?.avail || []).filter((u) => u.id !== subCtx.old_unit_id).map((u) => (
+              <button
+                key={u.id}
+                onClick={() => confirmSubstitute(u.id)}
+                disabled={!u.available}
+                data-testid={`sub-pick-${u.reference}`}
+                style={{
+                  display: "grid", gridTemplateColumns: "130px 1fr 90px", gap: 8,
+                  padding: "10px 14px", borderBottom: "1px solid var(--line)",
+                  background: "#fff", border: "none", cursor: u.available ? "pointer" : "not-allowed",
+                  width: "100%", textAlign: "left", opacity: u.available ? 1 : 0.5,
+                }}
+              >
+                <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>{u.reference}</span>
+                <span style={{ fontSize: 11, color: "var(--ink-mute)" }}>{(u.subitems || []).length > 0 && `${u.subitems.length} subítem(s)`}</span>
+                <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", color: u.available ? "var(--good)" : "var(--bad)", textAlign: "right" }}>
+                  {u.available ? "DISPONIBLE" : (u.reason || "no disp.")}
+                </span>
+              </button>
+            ))}
+            {(!subCtx?.avail || subCtx.avail.filter((u) => u.id !== subCtx.old_unit_id).length === 0) && (
+              <div style={{ padding: 14, color: "var(--ink-mute)", fontSize: 13 }}>No hay otras unidades disponibles.</div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSubOpen(false)}>Cerrar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

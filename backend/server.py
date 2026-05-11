@@ -47,7 +47,32 @@ api_router = APIRouter(prefix="/api")
 get_current_user, require_role = make_auth_dependencies(db)
 require_productor = require_role("productor")
 require_warehouse = require_role("productor", "almacen")
+require_almacen = require_role("almacen")
 require_any = require_role("productor", "almacen", "tecnico")
+
+
+async def _assert_event_modifiable(eid: str) -> dict:
+    """Return event if it can be modified; raise if closed or prep-locked."""
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("status") == "cerrado":
+        raise HTTPException(400, "Evento cerrado")
+    if ev.get("prep_status") == "preparado":
+        raise HTTPException(423, "Evento bloqueado por Almacén. Desbloquéalo para hacer cambios.")
+    return ev
+
+
+def _prep_log_entry(action: str, by_user: dict, **extra) -> dict:
+    import uuid as _uuid
+    return {
+        "id": str(_uuid.uuid4()),
+        "action": action,
+        "at": datetime.now(timezone.utc).isoformat(),
+        "by_user_id": by_user.get("id"),
+        "by_user_name": by_user.get("name") or by_user.get("email", ""),
+        **extra,
+    }
 
 # ---------- Storage ----------
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
@@ -243,6 +268,12 @@ class Event(BaseModel):
     rentals: List[RentalItem] = []
     vehicles: List[EventVehicle] = []
     assigned_technicians: List[str] = []
+    prep_status: Literal["pendiente", "preparado"] = "pendiente"
+    prep_checks: List[str] = []  # unit ids marked as prepared by almacen
+    prep_locked_at: Optional[str] = None
+    prep_locked_by: Optional[str] = None
+    prep_locked_by_name: str = ""
+    prep_log: List[Dict[str, Any]] = []
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -928,11 +959,7 @@ async def event_availability(eid: str, material_id: str, user: dict = Depends(ge
 
 # ---------- Block / unblock material ----------
 async def _block_units(eid: str, material_id: str, unit_ids: List[str]):
-    ev = await db.events.find_one({"id": eid}, PROJ)
-    if not ev:
-        raise HTTPException(404, "Event not found")
-    if ev.get("status") == "cerrado":
-        raise HTTPException(400, "Evento cerrado")
+    ev = await _assert_event_modifiable(eid)
     M = await db.materials.find_one({"id": material_id}, PROJ)
     if not M:
         raise HTTPException(404, "Material not found")
@@ -1009,6 +1036,7 @@ async def _block_units(eid: str, material_id: str, unit_ids: List[str]):
 
 @api_router.post("/events/{eid}/materials")
 async def block_material(eid: str, payload: BlockMaterialRequest, _u: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid)
     if payload.unit_ids:
         return await _block_units(eid, payload.material_id, payload.unit_ids)
     if payload.quantity is None or payload.quantity < 0:
@@ -1028,13 +1056,11 @@ async def block_material(eid: str, payload: BlockMaterialRequest, _u: dict = Dep
 
 @api_router.delete("/events/{eid}/materials/{material_id}")
 async def unblock_material(eid: str, material_id: str, _u: dict = Depends(require_warehouse)):
-    ev = await db.events.find_one({"id": eid}, PROJ)
-    if not ev:
-        raise HTTPException(404, "Event not found")
-    if ev.get("status") == "cerrado":
-        raise HTTPException(400, "Evento cerrado")
+    await _assert_event_modifiable(eid)
     await db.events.update_one({"id": eid}, {"$pull": {"materials": {"material_id": material_id}}})
-    return await db.events.find_one({"id": eid}, PROJ)
+    # also clean prep_checks of units that belonged to this material
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    return ev
 
 
 # ---------- Flightcases (library) ----------
@@ -1103,11 +1129,7 @@ async def delete_flightcase(fid: str, _u: dict = Depends(require_warehouse)):
 # ---------- Cable distribution per flightcase ----------
 @api_router.put("/events/{eid}/cable-distribution")
 async def set_cable_distribution(eid: str, payload: CableDistributionRequest, _u: dict = Depends(require_warehouse)):
-    ev = await db.events.find_one({"id": eid}, PROJ)
-    if not ev:
-        raise HTTPException(404, "Event not found")
-    if ev.get("status") == "cerrado":
-        raise HTTPException(400, "Evento cerrado")
+    ev = await _assert_event_modifiable(eid)
     em = next((m for m in ev.get("materials", []) if m["material_id"] == payload.material_id), None)
     if not em:
         raise HTTPException(404, "Material no bloqueado en el evento")
@@ -1137,6 +1159,7 @@ async def set_cable_distribution(eid: str, payload: CableDistributionRequest, _u
 
 @api_router.post("/events/{eid}/rentals")
 async def add_rental(eid: str, payload: RentalCreate, _u: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1157,6 +1180,7 @@ async def add_rental(eid: str, payload: RentalCreate, _u: dict = Depends(require
 
 @api_router.delete("/events/{eid}/rentals/{rid}")
 async def remove_rental(eid: str, rid: str, _u: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1196,6 +1220,7 @@ async def event_vehicle_availability(eid: str):
 
 @api_router.post("/events/{eid}/vehicles")
 async def add_event_vehicle(eid: str, payload: EventVehicleAdd, _u: dict = Depends(require_warehouse)):
+    await _assert_event_modifiable(eid)
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1241,14 +1266,187 @@ async def remove_event_vehicle(eid: str, vid: str, _u: dict = Depends(require_wa
 
 
 @api_router.post("/events/{eid}/close")
-async def close_event(eid: str):
+async def close_event(eid: str, _u: dict = Depends(require_warehouse)):
     await db.events.update_one({"id": eid}, {"$set": {"status": "cerrado"}})
     return await db.events.find_one({"id": eid}, PROJ)
 
 
 @api_router.post("/events/{eid}/reopen")
-async def reopen_event(eid: str):
+async def reopen_event(eid: str, _u: dict = Depends(require_warehouse)):
     await db.events.update_one({"id": eid}, {"$set": {"status": "abierto"}})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+# ---------- Preparación (Almacén) ----------
+class PrepCheckUnitRequest(BaseModel):
+    unit_id: str
+    checked: bool
+
+
+class PrepSubstituteRequest(BaseModel):
+    material_id: str
+    old_unit_id: str
+    new_unit_id: str
+
+
+class PrepRemoveRequest(BaseModel):
+    material_id: str
+    unit_id: str
+
+
+def _is_almacen(user: dict) -> bool:
+    return user.get("role") == "almacen"
+
+
+def _prep_locked_block_unless_almacen(ev: dict, user: dict):
+    """Prep section is editable only by Almacén. Lock state ignored here (handled by ops)."""
+    if not _is_almacen(user):
+        raise HTTPException(403, "Solo Almacén puede modificar la preparación")
+
+
+@api_router.post("/events/{eid}/prep/check-unit")
+async def prep_check_unit(eid: str, payload: PrepCheckUnitRequest, user: dict = Depends(get_current_user)):
+    _prep_locked_block_unless_almacen({}, user)
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("prep_status") == "preparado":
+        raise HTTPException(423, "Evento bloqueado. Desbloquea primero.")
+    checks = list(ev.get("prep_checks") or [])
+    if payload.checked and payload.unit_id not in checks:
+        checks.append(payload.unit_id)
+    if not payload.checked and payload.unit_id in checks:
+        checks = [c for c in checks if c != payload.unit_id]
+    log = list(ev.get("prep_log") or [])
+    log.append(_prep_log_entry(
+        "check" if payload.checked else "uncheck", user, unit_id=payload.unit_id,
+    ))
+    await db.events.update_one({"id": eid}, {"$set": {"prep_checks": checks, "prep_log": log}})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/prep/substitute")
+async def prep_substitute(eid: str, payload: PrepSubstituteRequest, user: dict = Depends(get_current_user)):
+    _prep_locked_block_unless_almacen({}, user)
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("prep_status") == "preparado":
+        raise HTTPException(423, "Evento bloqueado. Desbloquea primero.")
+    em = next((m for m in ev.get("materials", []) if m["material_id"] == payload.material_id), None)
+    if not em:
+        raise HTTPException(404, "Material no bloqueado en el evento")
+    # validate old/new units belong to same material
+    old_u = await db.units.find_one({"id": payload.old_unit_id}, PROJ)
+    new_u = await db.units.find_one({"id": payload.new_unit_id}, PROJ)
+    if not old_u or not new_u:
+        raise HTTPException(404, "Unidad no encontrada")
+    if old_u["material_id"] != payload.material_id or new_u["material_id"] != payload.material_id:
+        raise HTTPException(400, "Las unidades deben ser del mismo material")
+    # check new is available (not blocked elsewhere in overlapping events, not broken)
+    avail = await _compute_availability(eid, payload.material_id)
+    new_avail = next((u for u in avail["units"] if u["id"] == payload.new_unit_id), None)
+    if not new_avail or not new_avail["available"]:
+        raise HTTPException(400, f"Unidad {new_u['reference']} no disponible: {new_avail.get('reason') if new_avail else 'desconocido'}")
+    # replace in-place
+    units = list(em.get("units", []))
+    found = False
+    for i, u in enumerate(units):
+        if u["unit_id"] == payload.old_unit_id:
+            units[i] = {
+                **u,
+                "unit_id": new_u["id"],
+                "reference": new_u["reference"],
+                "subitems": new_u.get("subitems", []),
+            }
+            found = True
+            break
+    if not found:
+        raise HTTPException(404, "Unidad antigua no estaba bloqueada en este material")
+    # keep prep_checks but rename old → new if was checked
+    checks = list(ev.get("prep_checks") or [])
+    if payload.old_unit_id in checks:
+        checks = [c if c != payload.old_unit_id else payload.new_unit_id for c in checks]
+    log = list(ev.get("prep_log") or [])
+    log.append(_prep_log_entry(
+        "substitute", user,
+        material_id=payload.material_id,
+        old_unit_id=payload.old_unit_id, old_reference=old_u["reference"],
+        new_unit_id=payload.new_unit_id, new_reference=new_u["reference"],
+    ))
+    await db.events.update_one(
+        {"id": eid, "materials.material_id": payload.material_id},
+        {"$set": {"materials.$.units": units, "prep_checks": checks, "prep_log": log}},
+    )
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/prep/remove-unit")
+async def prep_remove_unit(eid: str, payload: PrepRemoveRequest, user: dict = Depends(get_current_user)):
+    _prep_locked_block_unless_almacen({}, user)
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("prep_status") == "preparado":
+        raise HTTPException(423, "Evento bloqueado. Desbloquea primero.")
+    em = next((m for m in ev.get("materials", []) if m["material_id"] == payload.material_id), None)
+    if not em:
+        raise HTTPException(404, "Material no bloqueado")
+    u = await db.units.find_one({"id": payload.unit_id}, PROJ)
+    new_units = [x for x in em.get("units", []) if x["unit_id"] != payload.unit_id]
+    log = list(ev.get("prep_log") or [])
+    log.append(_prep_log_entry(
+        "remove_unit", user,
+        material_id=payload.material_id,
+        unit_id=payload.unit_id,
+        reference=(u or {}).get("reference", ""),
+    ))
+    checks = [c for c in (ev.get("prep_checks") or []) if c != payload.unit_id]
+    if new_units:
+        await db.events.update_one(
+            {"id": eid, "materials.material_id": payload.material_id},
+            {"$set": {"materials.$.units": new_units, "prep_checks": checks, "prep_log": log}},
+        )
+    else:
+        await db.events.update_one(
+            {"id": eid},
+            {"$pull": {"materials": {"material_id": payload.material_id}},
+             "$set": {"prep_checks": checks, "prep_log": log}},
+        )
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/prep/lock")
+async def prep_lock(eid: str, user: dict = Depends(require_almacen)):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("status") == "cerrado":
+        raise HTTPException(400, "Evento cerrado")
+    log = list(ev.get("prep_log") or [])
+    log.append(_prep_log_entry("lock", user))
+    await db.events.update_one({"id": eid}, {"$set": {
+        "prep_status": "preparado",
+        "prep_locked_at": datetime.now(timezone.utc).isoformat(),
+        "prep_locked_by": user["id"],
+        "prep_locked_by_name": user.get("name") or user.get("email", ""),
+        "prep_log": log,
+    }})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/prep/unlock")
+async def prep_unlock(eid: str, user: dict = Depends(require_almacen)):
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    log = list(ev.get("prep_log") or [])
+    log.append(_prep_log_entry("unlock", user))
+    await db.events.update_one({"id": eid}, {"$set": {
+        "prep_status": "pendiente",
+        "prep_locked_at": None, "prep_locked_by": None, "prep_locked_by_name": "",
+        "prep_log": log,
+    }})
     return await db.events.find_one({"id": eid}, PROJ)
 
 
