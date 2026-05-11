@@ -970,16 +970,18 @@ async def list_events(user: dict = Depends(get_current_user)):
 
 @api_router.get("/events/similar-by-name")
 async def events_similar_by_name(name: str, exclude: str = "", user: dict = Depends(get_current_user)):
-    """Return past events (with materials) sharing the same name. Case-insensitive."""
-    if not name.strip():
+    """Return past events (with materials) sharing the same name. Case + accent insensitive."""
+    norm = _normalize_login(name)
+    if not norm:
         return []
-    pattern = f"^{re.escape(name.strip())}$"
-    q = {"name": {"$regex": pattern, "$options": "i"}}
+    q = {}
     if exclude:
         q["id"] = {"$ne": exclude}
-    events = await db.events.find(q, PROJ).sort("created_at", -1).to_list(50)
+    all_events = await db.events.find(q, PROJ).sort("created_at", -1).to_list(2000)
     out = []
-    for ev in events:
+    for ev in all_events:
+        if _normalize_login(ev.get("name", "")) != norm:
+            continue
         units_count = sum(len(m.get("units") or []) for m in (ev.get("materials") or []))
         if units_count == 0:
             continue
@@ -992,7 +994,7 @@ async def events_similar_by_name(name: str, exclude: str = "", user: dict = Depe
             "materials_count": len(ev.get("materials") or []),
             "units_count": units_count,
         })
-    return out
+    return out[:50]
 
 
 

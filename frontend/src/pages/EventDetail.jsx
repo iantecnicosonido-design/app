@@ -580,12 +580,12 @@ export default function EventDetail() {
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material bloqueado del stock</h3>
           {canMaterial && !isClosed && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {dupCandidatesCount > 0 && (
-                <Button onClick={() => setDupOpen(true)} variant="outline" size="sm" data-testid="duplicate-material-btn" title={`Hay ${dupCandidatesCount} evento(s) anterior(es) con el mismo nombre`}>
-                  <Copy size={14} /> Copiar de evento anterior
+              <Button onClick={() => setDupOpen(true)} variant="outline" size="sm" data-testid="duplicate-material-btn" title={dupCandidatesCount > 0 ? `Hay ${dupCandidatesCount} evento(s) anterior(es) con el mismo nombre` : "Copiar material de un evento anterior con el mismo nombre"}>
+                <Copy size={14} /> Copiar de evento anterior
+                {dupCandidatesCount > 0 && (
                   <span style={{ marginLeft: 6, fontSize: 10, padding: "1px 6px", background: "var(--accent)", color: "#fff", borderRadius: 999, fontFamily: "JetBrains Mono, monospace" }}>{dupCandidatesCount}</span>
-                </Button>
-              )}
+                )}
+              </Button>
               <Button onClick={() => setPackOpen(true)} variant="outline" size="sm" data-testid="apply-pack-btn"><Package size={14} /> Aplicar pack</Button>
               <Button onClick={() => setMatOpen(true)} style={{ background: "var(--accent)" }} size="sm" data-testid="block-material-btn"><Plus size={14} /> Bloquear material</Button>
             </div>
