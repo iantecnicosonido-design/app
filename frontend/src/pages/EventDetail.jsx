@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, API, formatDate } from "../lib/api";
-import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck, UserPlus, Users as UsersIcon, PackageCheck, PackageOpen, Copy } from "lucide-react";
+import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck, UserPlus, Users as UsersIcon, PackageCheck, PackageOpen, Copy, Calculator } from "lucide-react";
 import { useAuth, can } from "../lib/auth";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -15,6 +15,7 @@ import DuplicateMaterialDialog from "../components/DuplicateMaterialDialog";
 import InvoicesSection from "../components/InvoicesSection";
 import { ContactsSection, DocumentsSection } from "../components/EventBoloSections";
 import EventFinanceDocs from "../components/EventFinanceDocs";
+import AccountingDialog from "../components/AccountingDialog";
 import SearchSelect from "../components/SearchSelect";
 import { toast } from "sonner";
 
@@ -74,6 +75,7 @@ export default function EventDetail() {
   const [returnOpen, setReturnOpen] = useState(false);
   const [checkOpen, setCheckOpen] = useState(false);
   const [dupOpen, setDupOpen] = useState(false);
+  const [accountingOpen, setAccountingOpen] = useState(false);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -439,6 +441,11 @@ export default function EventDetail() {
             )
           )}
           <Button variant="outline" onClick={exportPDF} data-testid="export-pdf-btn"><FileDown size={16} /> PDF</Button>
+          {isProductor && (ev.type === "bolo" || ev.type === "alquiler") && (
+            <Button onClick={() => setAccountingOpen(true)} style={{ background: "#0f766e" }} data-testid="open-accounting-btn">
+              <Calculator size={16} /> Contabilidad
+            </Button>
+          )}
           {canClose && (!isClosed ? <Button onClick={closeEvent} style={{ background: "#1c1917" }}><Lock size={16} /> Cerrar</Button> : <Button onClick={reopenEvent} variant="outline"><Unlock size={16} /> Reabrir</Button>)}
           {canEditFicha && <Button variant="ghost" onClick={deleteEvent}><Trash2 size={16} color="#b91c1c" /></Button>}
         </div>
@@ -782,6 +789,13 @@ export default function EventDetail() {
         eventName={ev.name}
         allMaterials={materials}
         onApplied={(newEv) => { setEv(newEv); api.get("/units").then((r) => setAllUnits(r.data)); }}
+      />
+
+      <AccountingDialog
+        open={accountingOpen}
+        onOpenChange={setAccountingOpen}
+        event={ev}
+        onChanged={load}
       />
 
       {/* Block material with search */}
