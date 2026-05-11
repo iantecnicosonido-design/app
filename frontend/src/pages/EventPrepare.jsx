@@ -70,8 +70,12 @@ export default function EventPrepare() {
       }))
     );
   }, [ev]);
-  const totalUnits = allUnitRows.length;
-  const checkedCount = allUnitRows.filter((r) => prepChecks.has(r.unit_id)).length;
+  // Rentals also participate in the prep counter (their id is treated as a "unit id")
+  const rentalIds = useMemo(() => (ev?.rentals || []).map((r) => r.id), [ev]);
+  const totalUnits = allUnitRows.length + rentalIds.length;
+  const checkedCount =
+    allUnitRows.filter((r) => prepChecks.has(r.unit_id)).length +
+    rentalIds.filter((rid) => prepChecks.has(rid)).length;
 
   // ---------- API actions ----------
   const toggleOne = async (unit_id, checked) => {
@@ -145,7 +149,10 @@ export default function EventPrepare() {
 
   const markAll = async () => {
     if (!canEdit || isPrepLocked) return;
-    const allIds = (ev?.materials || []).flatMap((m) => (m.units || []).map((u) => u.unit_id));
+    const allIds = [
+      ...(ev?.materials || []).flatMap((m) => (m.units || []).map((u) => u.unit_id)),
+      ...(ev?.rentals || []).map((r) => r.id),
+    ];
     const pending = allIds.filter((uid) => !prepChecks.has(uid));
     if (pending.length === 0) { toast.info("Ya está todo marcado"); return; }
     if (!window.confirm(`¿Marcar como preparadas las ${pending.length} unidades restantes?`)) return;
@@ -329,20 +336,45 @@ export default function EventPrepare() {
           );
         })}
 
-        {/* Rentals (read-only here, but visible to mimic PDF) */}
+        {/* Rentals — toggleable as prep items too */}
         {(ev.rentals || []).length > 0 && (
           <div style={{ marginTop: 20 }}>
             <h3 style={{ fontSize: 14, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#b45309", margin: "0 0 4px" }}>
               Material de alquiler externo
             </h3>
             <div style={{ borderBottom: "1px solid #b45309", marginBottom: 10 }} />
-            {ev.rentals.map((r) => (
-              <div key={r.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px", padding: "6px 0", borderBottom: "1px solid var(--line)", fontSize: 13 }}>
-                <div>{r.name}{r.notes && <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>{r.notes}</div>}</div>
-                <div style={{ color: "var(--ink-mute)" }}>{r.provider_name || "—"}</div>
-                <div style={{ fontFamily: "JetBrains Mono, monospace", textAlign: "right" }}>x{r.quantity}</div>
-              </div>
-            ))}
+            {ev.rentals.map((r) => {
+              const checked = prepChecks.has(r.id);
+              return (
+                <div
+                  key={r.id}
+                  className="row-hover"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "26px 1fr 1fr 60px",
+                    padding: "8px 4px",
+                    borderBottom: "1px solid var(--line)",
+                    alignItems: "center", gap: 8,
+                    background: checked ? "#dcfce7" : "transparent",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={!canEdit || isPrepLocked}
+                    onChange={() => toggleOne(r.id, !checked)}
+                    data-testid={`prep-rental-${r.id}`}
+                    style={{ width: 16, height: 16, cursor: (canEdit && !isPrepLocked) ? "pointer" : "not-allowed" }}
+                  />
+                  <div style={{ fontSize: 13, fontWeight: 500, textDecoration: checked ? "line-through" : "none", color: checked ? "var(--ink-mute)" : "inherit" }}>
+                    {r.name}
+                    {r.notes && <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>{r.notes}</div>}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{r.provider_name || "—"}</div>
+                  <div style={{ fontFamily: "JetBrains Mono, monospace", textAlign: "right", fontSize: 13 }}>x{r.quantity}</div>
+                </div>
+              );
+            })}
           </div>
         )}
 

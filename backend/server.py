@@ -2240,6 +2240,8 @@ async def stats(user: dict = Depends(get_current_user)):
     open_events = await db.events.count_documents({"status": "abierto"})
     closed_events = await db.events.count_documents({"status": "cerrado"})
     incidents = await db.units.count_documents({"status": {"$in": ["broken", "repair"]}})
+    prep_ready = await db.events.count_documents({"status": "abierto", "prep_status": "preparado"})
+    prep_pending = await db.events.count_documents({"status": "abierto", "prep_status": {"$ne": "preparado"}})
     by_cat_cursor = db.materials.aggregate([
         {"$group": {"_id": "$category", "count": {"$sum": 1}, "qty": {"$sum": "$quantity"}}}
     ])
@@ -2253,6 +2255,8 @@ async def stats(user: dict = Depends(get_current_user)):
         "open_events": open_events,
         "closed_events": closed_events,
         "incidents": incidents,
+        "prep_ready": prep_ready,
+        "prep_pending": prep_pending,
         "by_category": by_cat,
     }
 

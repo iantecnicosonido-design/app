@@ -265,10 +265,11 @@ export default function EventDetail() {
   const isPrepLocked = ev?.prep_status === "preparado";
   const canMaterial = _canMaterial && !isPrepLocked;
 
-  // Flatten all blocked units for the prep summary (X/Y)
-  const prepRows = (ev?.materials || []).flatMap((m) =>
-    (m.units || []).map((u) => ({ unit_id: u.unit_id }))
-  );
+  // Flatten all blocked units + rentals for the prep summary (X/Y)
+  const prepRows = [
+    ...((ev?.materials || []).flatMap((m) => (m.units || []).map((u) => ({ unit_id: u.unit_id })))),
+    ...((ev?.rentals || []).map((r) => ({ unit_id: r.id }))),
+  ];
   const prepChecks = new Set(ev?.prep_checks || []);
   const totalUnits = prepRows.length;
   const checkedCount = prepRows.filter((r) => prepChecks.has(r.unit_id)).length;

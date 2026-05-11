@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, formatDate } from "../lib/api";
 import { Link } from "react-router-dom";
-import { CalendarDays, Boxes, Wrench, Package, GanttChartSquare } from "lucide-react";
+import { CalendarDays, Boxes, Wrench, Package, GanttChartSquare, CheckCircle2, Clock } from "lucide-react";
 import { MonthCalendar } from "./Events";
+import { useAuth } from "../lib/auth";
 
 function startOfWeek(d) {
   const x = new Date(d); x.setHours(0, 0, 0, 0);
@@ -13,6 +14,7 @@ function startOfWeek(d) {
 function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
 
 export default function Dashboard() {
+  const { user } = useAuth();
   const [stats, setStats] = useState(null);
   const [events, setEvents] = useState([]);
   const today = new Date();
@@ -53,6 +55,11 @@ export default function Dashboard() {
     };
   }, [events]);
 
+  // ------ Almacén-specific dashboard ------
+  if (user?.role === "almacen") {
+    return <AlmacenDashboard stats={stats} events={events} calYear={calYear} calMonth={calMonth} setCalYear={setCalYear} setCalMonth={setCalMonth} today={today} />;
+  }
+
   return (
     <div data-testid="dashboard-page">
       <h2 className="page-title">Bienvenido</h2>
@@ -92,14 +99,159 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ label, value, sub, icon: Icon, alert }) {
+// ===== Almacén-specific dashboard =====
+function AlmacenDashboard({ stats, events, calYear, calMonth, setCalYear, setCalMonth, today }) {
+  const openEvents = events.filter((e) => e.status === "abierto");
+  const prepReady = openEvents
+    .filter((e) => e.prep_status === "preparado")
+    .sort((a, b) => (a.event_date || "").localeCompare(b.event_date || ""));
+  const prepPending = openEvents
+    .filter((e) => e.prep_status !== "preparado")
+    .sort((a, b) => (a.event_date || "").localeCompare(b.event_date || ""));
+
   return (
-    <div className="stat-card" style={{ borderColor: alert ? "#b91c1c" : "var(--line)", background: alert ? "#fef2f2" : "#fff" }}>
+    <div data-testid="dashboard-page">
+      <h2 className="page-title">Almacén</h2>
+      <p className="page-sub">Estado de preparación y avisos</p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 22 }}>
+        <StatCard
+          label="Eventos preparados"
+          value={stats?.prep_ready ?? prepReady.length}
+          sub="bloqueados por almacén"
+          icon={CheckCircle2}
+          tone="good"
+        />
+        <StatCard
+          label="Pendientes de preparar"
+          value={stats?.prep_pending ?? prepPending.length}
+          sub="con material asignado o por revisar"
+          icon={Clock}
+          tone="warn"
+        />
+        <StatCard
+          label="Incidencias abiertas"
+          value={stats?.incidents ?? 0}
+          sub="averías o reparación"
+          icon={Wrench}
+          alert={(stats?.incidents ?? 0) > 0}
+        />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 18, marginBottom: 18 }}>
+        <MonthCalendar
+          year={calYear}
+          month={calMonth}
+          events={events}
+          compact
+          onPrev={() => { if (calMonth === 0) { setCalYear(calYear - 1); setCalMonth(11); } else setCalMonth(calMonth - 1); }}
+          onNext={() => { if (calMonth === 11) { setCalYear(calYear + 1); setCalMonth(0); } else setCalMonth(calMonth + 1); }}
+          onToday={() => { setCalYear(today.getFullYear()); setCalMonth(today.getMonth()); }}
+        />
+        <div className="card-paper">
+          <h3 style={{ margin: "0 0 14px", fontSize: 16, fontWeight: 700 }}>Accesos rápidos</h3>
+          <div style={{ display: "grid", gap: 8 }}>
+            <QA to="/eventos" icon={CalendarDays} label="Eventos" sub="Ver todos los eventos" />
+            <QA to="/inventario" icon={Boxes} label="Inventario" sub="Material y unidades" />
+            <QA to="/flightcases" icon={Package} label="Flightcases" sub="Cableado y reparto" />
+            <QA to="/vehiculos" icon={Boxes} label="Vehículos" sub="Furgonetas y alquileres" />
+            <QA to="/incidencias" icon={Wrench} label="Incidencias" sub="Averías y reparaciones" />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18 }}>
+        <PrepEventsCard
+          title="Pendientes de preparar"
+          icon={Clock}
+          color="#b45309"
+          events={prepPending}
+          empty="Todo al día. No hay eventos pendientes de preparar."
+          testid="prep-pending-list"
+        />
+        <PrepEventsCard
+          title="Preparados"
+          icon={CheckCircle2}
+          color="#166534"
+          events={prepReady}
+          empty="Sin eventos preparados ahora mismo."
+          testid="prep-ready-list"
+        />
+      </div>
+    </div>
+  );
+}
+
+function PrepEventsCard({ title, icon: Icon, color, events, empty, testid }) {
+  return (
+    <div className="card-paper" data-testid={testid}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 8, color }}>
+          <Icon size={16} /> {title}
+        </h3>
+        <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)" }}>{events.length}</span>
+      </div>
+      {events.length === 0 ? (
+        <p style={{ color: "var(--ink-mute)", fontSize: 13, margin: 0 }}>{empty}</p>
+      ) : (
+        <div style={{ display: "grid", gap: 4, maxHeight: 360, overflowY: "auto" }}>
+          {events.map((e) => {
+            const totalUnits =
+              (e.materials || []).reduce((acc, m) => acc + (m.units || []).length, 0) +
+              (e.rentals || []).length;
+            const checkedCount = (e.prep_checks || []).length;
+            return (
+              <Link
+                key={e.id}
+                to={`/eventos/${e.id}/preparacion`}
+                className="row-hover"
+                style={{
+                  display: "grid", gridTemplateColumns: "1fr 90px 90px",
+                  alignItems: "center", gap: 8,
+                  padding: "8px 10px", borderRadius: 6,
+                  textDecoration: "none", color: "inherit",
+                  background: "#faf6ef",
+                }}
+              >
+                <div style={{ overflow: "hidden" }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {e.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                    {e.type} {e.client_name ? `· ${e.client_name}` : ""}
+                  </div>
+                </div>
+                <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "var(--ink-mute)", textAlign: "right" }}>
+                  {formatDate(e.event_date)}
+                </span>
+                <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: checkedCount === totalUnits && totalUnits > 0 ? "var(--good)" : "var(--ink-mute)", textAlign: "right" }}>
+                  {checkedCount}/{totalUnits}
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value, sub, icon: Icon, alert, tone }) {
+  const toneStyles = {
+    good: { border: "#86efac", bg: "#f0fdf4", color: "#166534" },
+    warn: { border: "#fcd34d", bg: "#fffbeb", color: "#b45309" },
+  };
+  const t = tone ? toneStyles[tone] : null;
+  return (
+    <div className="stat-card" style={{
+      borderColor: alert ? "#b91c1c" : (t?.border || "var(--line)"),
+      background: alert ? "#fef2f2" : (t?.bg || "#fff"),
+    }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div className="label">{label}</div>
-        {Icon && <Icon size={16} color={alert ? "#b91c1c" : "var(--ink-mute)"} />}
+        {Icon && <Icon size={16} color={alert ? "#b91c1c" : (t?.color || "var(--ink-mute)")} />}
       </div>
-      <div className="value" style={{ color: alert ? "#b91c1c" : "var(--ink)" }}>{value}</div>
+      <div className="value" style={{ color: alert ? "#b91c1c" : (t?.color || "var(--ink)") }}>{value}</div>
       <div className="delta">{sub}</div>
     </div>
   );
