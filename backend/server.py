@@ -3395,6 +3395,14 @@ async def seed_admin():
         await db.users.insert_one(u.model_dump())
         logger.info(f"Admin sembrado: {admin_email}")
     # Cuentas internas protegidas (sin email real)
+    # - Admin: usuario y contraseña "Admin", rol productor
+    if not await db.users.find_one({"email": "admin"}, {"_id": 0}):
+        ad = User(email="admin", password_hash=hash_password("Admin"),
+                  name="Admin", role="productor", protected=True)
+        await db.users.insert_one(ad.model_dump())
+        logger.info("Cuenta interna Admin sembrada")
+    else:
+        await db.users.update_one({"email": "admin"}, {"$set": {"protected": True, "role": "productor"}})
     # - Taller: usuario y contraseña "Taller"
     if not await db.users.find_one({"email": "taller"}, {"_id": 0}):
         t = User(email="taller", password_hash=hash_password("Taller"),
