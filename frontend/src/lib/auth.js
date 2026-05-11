@@ -44,6 +44,7 @@ export const ROLE_LABEL = {
   productor: "Productor",
   almacen: "Almacén",
   tecnico: "Técnico",
+  taller: "Taller",
 };
 
 export const can = (user, action) => {
@@ -55,7 +56,7 @@ export const can = (user, action) => {
     case "event_close": return role === "productor" || role === "almacen";
     case "event_material": return role === "productor" || role === "almacen";
     case "inventory_edit": return role === "productor" || role === "almacen";
-    case "resolve_incident": return role === "productor" || role === "almacen";
+    case "resolve_incident": return role === "taller";
     case "create_incident": return true;
     case "export_pdf": return true;
     default: return false;

@@ -53,7 +53,7 @@ export default function Login() {
           <h2 style={{ margin: "0 0 18px 0", fontSize: 18, fontWeight: 600 }}>{forgot ? "Recuperar contraseña" : "Iniciar sesión"}</h2>
           {!forgot ? (
             <>
-              <Lbl label="Email"><Input type="email" autoFocus value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@email.com" required data-testid="login-email" /></Lbl>
+              <Lbl label="Usuario o email"><Input type="text" autoFocus autoCapitalize="off" autoCorrect="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@email.com o usuario" required data-testid="login-email" /></Lbl>
               <Lbl label="Contraseña"><Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required data-testid="login-password" /></Lbl>
               <Button type="submit" disabled={busy} style={{ background: "var(--accent)", width: "100%", marginTop: 12 }} data-testid="login-submit">
                 {busy ? "Entrando..." : "Entrar"}

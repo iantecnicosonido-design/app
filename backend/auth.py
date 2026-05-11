@@ -22,8 +22,9 @@ class User(BaseModel):
     password_hash: str = ""
     name: str = ""
     phone: str = ""
-    role: str = "tecnico"  # productor | almacen | tecnico
+    role: str = "tecnico"  # productor | almacen | tecnico | taller
     active: bool = True
+    protected: bool = False  # cuentas internas (taller, almacen) que no se pueden borrar/desactivar
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -70,7 +71,7 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
-ROLES = ("productor", "almacen", "tecnico")
+ROLES = ("productor", "almacen", "tecnico", "taller")
 
 
 # ---------- Hashing ----------

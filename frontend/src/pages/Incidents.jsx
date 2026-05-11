@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, API } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { Plus, Wrench, FileText, Image as ImgIcon, X, Filter } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -17,6 +18,8 @@ const TYPE_LABELS = {
 };
 
 export default function Incidents() {
+  const { user } = useAuth();
+  const canResolve = user?.role === "taller";
   const [params, setParams] = useSearchParams();
   const initialMaterial = params.get("material_id") || "";
   const initialUnit = params.get("unit_id") || "";
@@ -180,7 +183,11 @@ export default function Incidents() {
                   </div>
                   <span style={{ padding: "4px 10px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: status === "broken" ? "#fee2e2" : "#fef3c7", color: status === "broken" ? "#991b1b" : "#92400e", textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>{status === "broken" ? "AVERIADO" : "REPARACIÓN"}</span>
                   <Button size="sm" variant="outline" onClick={() => showHistory(it)}>Histórico</Button>
-                  <Button size="sm" onClick={() => setOpenResolve(it)} style={{ background: "var(--good)" }}>Resolver</Button>
+                  {canResolve ? (
+                    <Button size="sm" onClick={() => setOpenResolve(it)} style={{ background: "var(--good)" }} data-testid={`resolve-${key}`}>Resolver</Button>
+                  ) : (
+                    <span style={{ fontSize: 10, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace", textAlign: "center", textTransform: "uppercase", letterSpacing: "0.06em" }}>Solo taller</span>
+                  )}
                 </div>
               );
             })}

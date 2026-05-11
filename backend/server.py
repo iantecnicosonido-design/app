@@ -7,6 +7,7 @@ import os
 import json
 import io
 import logging
+import unicodedata
 import requests as http_requests
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -48,7 +49,23 @@ get_current_user, require_role = make_auth_dependencies(db)
 require_productor = require_role("productor")
 require_warehouse = require_role("productor", "almacen")
 require_almacen = require_role("almacen")
+require_taller = require_role("taller")
 require_any = require_role("productor", "almacen", "tecnico")
+
+
+def _normalize_login(s: str) -> str:
+    """Lowercase + strip accents. Used to match login usernames like 'Almacén' -> 'almacen'."""
+    if not s:
+        return ""
+    s = s.strip().lower()
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
+
+
+def _strip_accents(s: str) -> str:
+    """Strip accents preserving case (for password tolerance on protected accounts)."""
+    if not s:
+        return ""
+    return "".join(c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn")
 
 
 async def _assert_event_modifiable(eid: str) -> dict:
@@ -1813,7 +1830,7 @@ async def vehicle_history(vid: str, user: dict = Depends(get_current_user)):
 
 
 @api_router.post("/incidents/{unit_id}/resolve")
-async def resolve_incident(unit_id: str, payload: IncidentResolve, _u: dict = Depends(require_warehouse)):
+async def resolve_incident(unit_id: str, payload: IncidentResolve, _u: dict = Depends(require_taller)):
     u = await db.units.find_one({"id": unit_id}, PROJ)
     if not u:
         raise HTTPException(404, "Unit not found")
@@ -1827,7 +1844,7 @@ async def resolve_incident(unit_id: str, payload: IncidentResolve, _u: dict = De
 
 
 @api_router.post("/vehicle-incidents/{vid}/resolve")
-async def resolve_vehicle_incident(vid: str, payload: IncidentResolve, _u: dict = Depends(require_warehouse)):
+async def resolve_vehicle_incident(vid: str, payload: IncidentResolve, _u: dict = Depends(require_taller)):
     v = await db.vehicles.find_one({"id": vid}, PROJ)
     if not v:
         raise HTTPException(404, "Vehicle not found")
@@ -2892,6 +2909,24 @@ async def seed_admin():
                  name=admin_name, role="productor")
         await db.users.insert_one(u.model_dump())
         logger.info(f"Admin sembrado: {admin_email}")
+    # Cuentas internas protegidas (sin email real)
+    # - Taller: usuario y contraseña "Taller"
+    if not await db.users.find_one({"email": "taller"}, {"_id": 0}):
+        t = User(email="taller", password_hash=hash_password("Taller"),
+                 name="Taller de reparaciones", role="taller", protected=True)
+        await db.users.insert_one(t.model_dump())
+        logger.info("Cuenta interna Taller sembrada")
+    else:
+        # asegurar protected=True por si la cuenta existía antes
+        await db.users.update_one({"email": "taller"}, {"$set": {"protected": True, "role": "taller"}})
+    # - Almacén fijo: usuario "almacen", contraseña "Almacén"
+    if not await db.users.find_one({"email": "almacen"}, {"_id": 0}):
+        a = User(email="almacen", password_hash=hash_password("Almacén"),
+                 name="Almacén", role="almacen", protected=True)
+        await db.users.insert_one(a.model_dump())
+        logger.info("Cuenta interna Almacén sembrada")
+    else:
+        await db.users.update_one({"email": "almacen"}, {"$set": {"protected": True, "role": "almacen"}})
     # ensure indexes
     try:
         await db.users.create_index("email", unique=True)
@@ -2903,16 +2938,28 @@ async def seed_admin():
 def _public_user(u: dict) -> dict:
     return {"id": u["id"], "email": u["email"], "name": u.get("name", ""),
             "phone": u.get("phone", ""),
-            "role": u.get("role", "tecnico"), "active": u.get("active", True)}
+            "role": u.get("role", "tecnico"), "active": u.get("active", True),
+            "protected": u.get("protected", False)}
 
 
 @api_router.post("/auth/login")
 async def auth_login(payload: LoginRequest, response: Response):
-    email = payload.email.strip().lower()
-    user = await db.users.find_one({"email": email}, PROJ)
+    raw = payload.email.strip()
+    normalized = _normalize_login(raw)
+    # Try exact match first (real emails preserve dots/etc), then normalized for usernames
+    user = await db.users.find_one({"email": raw.lower()}, PROJ)
+    if not user:
+        user = await db.users.find_one({"email": normalized}, PROJ)
     if not user or not user.get("active", True):
         raise HTTPException(401, "Credenciales inválidas")
-    if not verify_password(payload.password, user["password_hash"]):
+    # Para cuentas protegidas (Taller/Almacén) aceptamos la contraseña con o sin acentos
+    password_ok = verify_password(payload.password, user["password_hash"])
+    if not password_ok and user.get("protected"):
+        # cuentas internas: tolerar acentos en la contraseña (ej. "Almacen" vs "Almacén")
+        stripped = _strip_accents(payload.password)
+        if stripped != payload.password:
+            password_ok = verify_password(stripped, user["password_hash"])
+    if not password_ok:
         raise HTTPException(401, "Credenciales inválidas")
     access = create_access_token(user["id"], user["email"])
     refresh = create_refresh_token(user["id"])
@@ -3110,6 +3157,8 @@ async def delete_user(uid: str, user: dict = Depends(require_role("productor")))
     target = await db.users.find_one({"id": uid}, PROJ)
     if not target:
         raise HTTPException(404, "Usuario no encontrado")
+    if target.get("protected"):
+        raise HTTPException(400, "No se puede eliminar una cuenta interna protegida")
     await db.users.delete_one({"id": uid})
     return {"ok": True}
 

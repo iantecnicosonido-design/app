@@ -58,6 +58,16 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
   - Panel en evento muestra 4 estados (Pendiente entrega / Entregado / Pendiente comprobación / Comprobado) con PDFs descargables de cada paso + DNI
 - ✅ Tests automatizados pasados (24/24 backend, 7/7 frontend)
 - ✅ **Migración email Resend → Brevo (Feb 2026)**: `emailer.py` reescrito para usar Brevo API v3 vía httpx async. Mantiene misma interfaz `send_email(to, subject, html, text, attachments)`, por lo que todos los flujos siguen funcionando (asignación técnicos, reset password, bienvenida, entrega/devolución/comprobación con PDF adjunto). Variables: `BREVO_API_KEY`, `SENDER_EMAIL`, `SENDER_NAME`. Probado en producción con adjunto PDF ✅
+- ✅ **Favicon 32x32 (Feb 2026)**: generado desde el logo (icono circular "E"). `favicon.ico` multi-size, `favicon-32x32.png`, `apple-touch-icon.png` (180x180 iOS).
+- ✅ **Nuevo rol `taller` + cuentas internas protegidas (Feb 2026)**:
+  - Nuevo rol `taller` añadido a `ROLES`. Solo ve la sección Incidencias (resto del menú oculto, redirección automática)
+  - Solo el rol `taller` puede resolver incidencias (`/incidents/{id}/resolve` y `/vehicle-incidents/{id}/resolve`). Productor y Almacén ya no pueden marcar como solucionada
+  - Campo `protected: bool` en modelo User. Las cuentas protegidas no se pueden eliminar ni desactivar; sí cambiar contraseña por el productor
+  - Cuentas internas sembradas en startup (sin email real):
+    - `Taller` / `Taller` (rol taller, protected=true)
+    - `Almacén` / `Almacén` (rol almacen, protected=true) — segundo almacén además del de email almacen@test.com
+  - Login normaliza usuario y contraseña (lowercase + strip de acentos) para tolerar "Almacen"/"Almacén"/"almacen" indistintamente
+  - Email obligatorio sigue siendo requerido para crear nuevos usuarios desde la UI; las cuentas internas no se crean desde UI
 
 ## Backlog
 ### P1

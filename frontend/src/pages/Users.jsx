@@ -81,19 +81,20 @@ export default function Users() {
               <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
                 {u.name || u.email}
                 {u.id === me?.id && <span style={{ fontSize: 9, padding: "2px 6px", background: "#fef3c7", color: "#92400e", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase" }}>TÚ</span>}
+                {u.protected && <span style={{ fontSize: 9, padding: "2px 6px", background: "#fce7f3", color: "#9d174d", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em" }}>INTERNA</span>}
               </div>
               <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{u.email}{u.phone ? ` · ${u.phone}` : ""}</div>
             </div>
             <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 999, fontWeight: 600, background: roleBg(u.role), color: roleColor(u.role), textTransform: "uppercase", letterSpacing: "0.06em", textAlign: "center" }}>{ROLE_LABEL[u.role] || u.role}</span>
-            <button onClick={() => toggleActive(u)} disabled={u.id === me?.id} style={{ background: "none", border: "none", cursor: u.id === me?.id ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em", color: u.active ? "var(--good)" : "var(--bad)", textAlign: "center", padding: "4px 8px" }}>
+            <button onClick={() => toggleActive(u)} disabled={u.id === me?.id || u.protected} style={{ background: "none", border: "none", cursor: (u.id === me?.id || u.protected) ? "not-allowed" : "pointer", fontSize: 11, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em", color: u.active ? "var(--good)" : "var(--bad)", textAlign: "center", padding: "4px 8px", opacity: u.protected ? 0.6 : 1 }}>
               {u.active ? "● ACTIVO" : "○ INACTIVO"}
             </button>
             <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
               <Button size="icon" variant="ghost" title="Cambiar contraseña" onClick={() => { setPwdFor(u); setNewPwd(""); }}><Key size={14} /></Button>
-              <Button size="icon" variant="ghost" onClick={() => startEdit(u)}><Pencil size={14} /></Button>
+              {!u.protected && <Button size="icon" variant="ghost" onClick={() => startEdit(u)}><Pencil size={14} /></Button>}
             </div>
             <div style={{ textAlign: "right" }}>
-              {u.id !== me?.id && <Button size="icon" variant="ghost" onClick={() => remove(u)}><Trash2 size={14} /></Button>}
+              {u.id !== me?.id && !u.protected && <Button size="icon" variant="ghost" onClick={() => remove(u)}><Trash2 size={14} /></Button>}
             </div>
           </div>
         ))}
@@ -113,6 +114,7 @@ export default function Users() {
                   <SelectItem value="productor">Productor</SelectItem>
                   <SelectItem value="almacen">Almacén</SelectItem>
                   <SelectItem value="tecnico">Técnico</SelectItem>
+                  <SelectItem value="taller">Taller</SelectItem>
                 </SelectContent>
               </Select>
             </Lbl>
@@ -143,10 +145,10 @@ export default function Users() {
 }
 
 function roleBg(role) {
-  return { productor: "#fef3c7", almacen: "#e0e7ff", tecnico: "#dcfce7" }[role] || "#f5f5f4";
+  return { productor: "#fef3c7", almacen: "#e0e7ff", tecnico: "#dcfce7", taller: "#fce7f3" }[role] || "#f5f5f4";
 }
 function roleColor(role) {
-  return { productor: "#92400e", almacen: "#3730a3", tecnico: "#166534" }[role] || "#78716c";
+  return { productor: "#92400e", almacen: "#3730a3", tecnico: "#166534", taller: "#9d174d" }[role] || "#78716c";
 }
 
 function Lbl({ label, children }) {

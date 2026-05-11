@@ -22,7 +22,11 @@ function ProtectedRoute({ children, roles }) {
   const { user } = useAuth();
   if (user === undefined) return <div style={{ padding: 40, textAlign: "center", color: "var(--ink-mute)" }}>Cargando...</div>;
   if (user === null) return <Navigate to="/login" replace />;
-  if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
+  if (roles && !roles.includes(user.role)) {
+    // taller solo puede acceder a incidencias
+    const fallback = user.role === "taller" ? "/incidencias" : "/";
+    return <Navigate to={fallback} replace />;
+  }
   return children;
 }
 
@@ -35,10 +39,10 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/inventario" element={<Inventory />} />
-              <Route path="/eventos" element={<Events />} />
-              <Route path="/eventos/:id" element={<EventDetail />} />
+              <Route path="/" element={<ProtectedRoute roles={["productor", "almacen", "tecnico"]}><Dashboard /></ProtectedRoute>} />
+              <Route path="/inventario" element={<ProtectedRoute roles={["productor", "almacen"]}><Inventory /></ProtectedRoute>} />
+              <Route path="/eventos" element={<ProtectedRoute roles={["productor", "almacen", "tecnico"]}><Events /></ProtectedRoute>} />
+              <Route path="/eventos/:id" element={<ProtectedRoute roles={["productor", "almacen", "tecnico"]}><EventDetail /></ProtectedRoute>} />
               <Route path="/eventos/:id/preparacion" element={<ProtectedRoute roles={["productor", "almacen"]}><EventPrepare /></ProtectedRoute>} />
               <Route path="/proveedores" element={<ProtectedRoute roles={["productor", "almacen"]}><Providers /></ProtectedRoute>} />
               <Route path="/packs" element={<ProtectedRoute roles={["productor", "almacen"]}><Packs /></ProtectedRoute>} />

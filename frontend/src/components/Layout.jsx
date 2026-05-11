@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Boxes, CalendarDays, Building2, Wrench, Package, GanttChartSquare, Box, Truck, Users as UsersIcon, LogOut } from "lucide-react";
+import { LayoutDashboard, Boxes, CalendarDays, Building2, Wrench, Package, GanttChartSquare, Box, Truck, Users as UsersIcon, LogOut, Hammer } from "lucide-react";
 import { useAuth, ROLE_LABEL } from "../lib/auth";
 
 const navItems = [
@@ -10,7 +10,7 @@ const navItems = [
   { to: "/packs", icon: Package, label: "Packs", roles: ["productor", "almacen"] },
   { to: "/flightcases", icon: Box, label: "Flightcases", roles: ["productor", "almacen"] },
   { to: "/vehiculos", icon: Truck, label: "Vehículos", roles: ["productor", "almacen"] },
-  { to: "/incidencias", icon: Wrench, label: "Incidencias", roles: ["productor", "almacen", "tecnico"] },
+  { to: "/incidencias", icon: Wrench, label: "Incidencias", roles: ["productor", "almacen", "tecnico", "taller"] },
   { to: "/proveedores", icon: Building2, label: "Proveedores", roles: ["productor", "almacen"] },
   { to: "/usuarios", icon: UsersIcon, label: "Usuarios", roles: ["productor"] },
 ];
