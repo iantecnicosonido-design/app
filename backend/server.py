@@ -1,5 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse, Response
+from fastapi import FastAPI, APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
+from fastapi.responses import StreamingResponse, Response, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -12,7 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
@@ -20,6 +20,15 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.lib.utils import ImageReader
+
+from auth import (
+    User, UserPublic, LoginRequest, RegisterRequest, UpdateUserRequest,
+    ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest, ROLES,
+    hash_password, verify_password, create_access_token, create_refresh_token,
+    decode_token, set_auth_cookies, clear_auth_cookies, make_auth_dependencies,
+    gen_reset_token,
+)
+import jwt as _jwt
 
 
 ROOT_DIR = Path(__file__).parent
@@ -32,6 +41,12 @@ db = client[os.environ['DB_NAME']]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
+
+# auth dependencies (must be available for route decorators below)
+get_current_user, require_role = make_auth_dependencies(db)
+require_productor = require_role("productor")
+require_warehouse = require_role("productor", "almacen")
+require_any = require_role("productor", "almacen", "tecnico")
 
 # ---------- Storage ----------
 STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
@@ -226,6 +241,7 @@ class Event(BaseModel):
     materials: List[EventMaterial] = []
     rentals: List[RentalItem] = []
     vehicles: List[EventVehicle] = []
+    assigned_technicians: List[str] = []
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 
@@ -249,6 +265,7 @@ class EventCreate(BaseModel):
     act_end_dt: Optional[str] = None
     dismount_start_dt: Optional[str] = None
     dismount_end_dt: Optional[str] = None
+    assigned_technicians: List[str] = []
 
 
 class EventUpdate(EventCreate):
@@ -540,12 +557,12 @@ async def seed_and_migrate():
 
 # ---------- Categories ----------
 @api_router.get("/categories")
-async def list_categories():
+async def list_categories(user: dict = Depends(get_current_user)):
     return await db.categories.find({}, PROJ).sort("order", 1).to_list(200)
 
 
 @api_router.post("/categories", response_model=CategoryModel)
-async def create_category(payload: CategoryCreate):
+async def create_category(payload: CategoryCreate, _u: dict = Depends(require_warehouse)):
     if await db.categories.find_one({"key": payload.key}):
         raise HTTPException(400, "Esta clave ya existe")
     last = await db.categories.find({}, PROJ).sort("order", -1).limit(1).to_list(1)
@@ -556,7 +573,7 @@ async def create_category(payload: CategoryCreate):
 
 
 @api_router.put("/categories/{key}")
-async def update_category(key: str, payload: CategoryUpdate):
+async def update_category(key: str, payload: CategoryUpdate, _u: dict = Depends(require_warehouse)):
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "Sin cambios")
@@ -567,7 +584,7 @@ async def update_category(key: str, payload: CategoryUpdate):
 
 
 @api_router.delete("/categories/{key}")
-async def delete_category(key: str):
+async def delete_category(key: str, _u: dict = Depends(require_warehouse)):
     if await db.materials.count_documents({"category": key}) > 0:
         raise HTTPException(400, "Hay materiales en esta categoría. Muévelos primero.")
     await db.categories.delete_one({"key": key})
@@ -581,7 +598,7 @@ async def _vehicle_with_counts(v: dict) -> dict:
 
 
 @api_router.get("/vehicles")
-async def list_vehicles():
+async def list_vehicles(user: dict = Depends(get_current_user)):
     items = await db.vehicles.find({}, PROJ).sort("name", 1).to_list(500)
     for v in items:
         await _vehicle_with_counts(v)
@@ -589,7 +606,7 @@ async def list_vehicles():
 
 
 @api_router.post("/vehicles", response_model=Vehicle)
-async def create_vehicle(payload: VehicleCreate):
+async def create_vehicle(payload: VehicleCreate, _u: dict = Depends(require_warehouse)):
     name = payload.name.strip()
     plate = payload.plate.strip().upper()
     if not name or not plate:
@@ -602,7 +619,7 @@ async def create_vehicle(payload: VehicleCreate):
 
 
 @api_router.put("/vehicles/{vid}", response_model=Vehicle)
-async def update_vehicle(vid: str, payload: VehicleUpdate):
+async def update_vehicle(vid: str, payload: VehicleUpdate, _u: dict = Depends(require_warehouse)):
     v = await db.vehicles.find_one({"id": vid}, PROJ)
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
@@ -618,7 +635,7 @@ async def update_vehicle(vid: str, payload: VehicleUpdate):
 
 
 @api_router.delete("/vehicles/{vid}")
-async def delete_vehicle(vid: str):
+async def delete_vehicle(vid: str, _u: dict = Depends(require_warehouse)):
     v = await db.vehicles.find_one({"id": vid}, PROJ)
     if not v:
         raise HTTPException(404, "Vehículo no encontrado")
@@ -632,7 +649,7 @@ async def delete_vehicle(vid: str):
 
 # ---------- Materials & Units ----------
 @api_router.get("/materials")
-async def list_materials(category: Optional[str] = None, q: Optional[str] = None):
+async def list_materials(category: Optional[str] = None, q: Optional[str] = None, user: dict = Depends(get_current_user)):
     query = {}
     if category:
         query["category"] = category
@@ -656,7 +673,7 @@ async def list_materials(category: Optional[str] = None, q: Optional[str] = None
 
 
 @api_router.post("/materials", response_model=Material)
-async def create_material(payload: MaterialCreate):
+async def create_material(payload: MaterialCreate, _u: dict = Depends(require_warehouse)):
     data = payload.model_dump()
     if not data.get("reference"):
         data["reference"] = await next_base_reference(data["category"])
@@ -668,7 +685,7 @@ async def create_material(payload: MaterialCreate):
 
 
 @api_router.put("/materials/{material_id}", response_model=Material)
-async def update_material(material_id: str, payload: MaterialUpdate):
+async def update_material(material_id: str, payload: MaterialUpdate, _u: dict = Depends(require_warehouse)):
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
@@ -681,7 +698,7 @@ async def update_material(material_id: str, payload: MaterialUpdate):
 
 
 @api_router.delete("/materials/{material_id}")
-async def delete_material(material_id: str):
+async def delete_material(material_id: str, _u: dict = Depends(require_warehouse)):
     m = await db.materials.find_one({"id": material_id}, PROJ)
     if not m:
         raise HTTPException(404, "Material not found")
@@ -693,7 +710,7 @@ async def delete_material(material_id: str):
 
 
 @api_router.get("/units")
-async def list_units(material_id: Optional[str] = None, status: Optional[str] = None):
+async def list_units(material_id: Optional[str] = None, status: Optional[str] = None, user: dict = Depends(get_current_user)):
     q = {}
     if material_id:
         q["material_id"] = material_id
@@ -704,7 +721,7 @@ async def list_units(material_id: Optional[str] = None, status: Optional[str] = 
 
 
 @api_router.post("/materials/{material_id}/units", response_model=MaterialUnit)
-async def add_unit(material_id: str):
+async def add_unit(material_id: str, _u: dict = Depends(require_warehouse)):
     m = await db.materials.find_one({"id": material_id}, PROJ)
     if not m:
         raise HTTPException(404, "Material not found")
@@ -717,7 +734,7 @@ async def add_unit(material_id: str):
 
 
 @api_router.put("/units/{unit_id}")
-async def update_unit(unit_id: str, payload: UnitUpdate):
+async def update_unit(unit_id: str, payload: UnitUpdate, _u: dict = Depends(require_warehouse)):
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
@@ -741,7 +758,7 @@ async def update_unit(unit_id: str, payload: UnitUpdate):
 
 
 @api_router.delete("/units/{unit_id}")
-async def delete_unit(unit_id: str):
+async def delete_unit(unit_id: str, _u: dict = Depends(require_warehouse)):
     u = await db.units.find_one({"id": unit_id}, PROJ)
     if not u:
         raise HTTPException(404, "Unit not found")
@@ -758,19 +775,19 @@ async def delete_unit(unit_id: str):
 
 # ---------- Providers ----------
 @api_router.get("/providers", response_model=List[Provider])
-async def list_providers():
+async def list_providers(user: dict = Depends(get_current_user)):
     return await db.providers.find({}, PROJ).sort("name", 1).to_list(1000)
 
 
 @api_router.post("/providers", response_model=Provider)
-async def create_provider(payload: ProviderCreate):
+async def create_provider(payload: ProviderCreate, _u: dict = Depends(require_warehouse)):
     p = Provider(**payload.model_dump())
     await db.providers.insert_one(p.model_dump())
     return p
 
 
 @api_router.put("/providers/{pid}", response_model=Provider)
-async def update_provider(pid: str, payload: ProviderCreate):
+async def update_provider(pid: str, payload: ProviderCreate, _u: dict = Depends(require_warehouse)):
     res = await db.providers.find_one_and_update({"id": pid}, {"$set": payload.model_dump()}, return_document=True, projection=PROJ)
     if not res:
         raise HTTPException(404, "Provider not found")
@@ -778,7 +795,7 @@ async def update_provider(pid: str, payload: ProviderCreate):
 
 
 @api_router.delete("/providers/{pid}")
-async def delete_provider(pid: str):
+async def delete_provider(pid: str, _u: dict = Depends(require_warehouse)):
     p = await db.providers.find_one({"id": pid}, PROJ)
     if not p:
         raise HTTPException(404, "Provider not found")
@@ -788,27 +805,32 @@ async def delete_provider(pid: str):
 
 # ---------- Events ----------
 @api_router.get("/events", response_model=List[Event])
-async def list_events():
-    return await db.events.find({}, PROJ).sort("event_date", 1).to_list(5000)
+async def list_events(user: dict = Depends(get_current_user)):
+    query = {}
+    if user.get("role") == "tecnico":
+        query = {"assigned_technicians": user["id"]}
+    return await db.events.find(query, PROJ).sort("event_date", 1).to_list(5000)
 
 
 @api_router.get("/events/{eid}", response_model=Event)
-async def get_event(eid: str):
+async def get_event(eid: str, user: dict = Depends(get_current_user)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
+    if user.get("role") == "tecnico" and user["id"] not in (ev.get("assigned_technicians") or []):
+        raise HTTPException(403, "Sin acceso a este evento")
     return ev
 
 
 @api_router.post("/events", response_model=Event)
-async def create_event(payload: EventCreate):
+async def create_event(payload: EventCreate, _u: dict = Depends(require_productor)):
     e = Event(**payload.model_dump())
     await db.events.insert_one(e.model_dump())
     return e
 
 
 @api_router.post("/events/bulk")
-async def bulk_create_events(payload: BulkEventsRequest):
+async def bulk_create_events(payload: BulkEventsRequest, _u: dict = Depends(require_productor)):
     docs = [Event(**ec.model_dump()).model_dump() for ec in payload.events]
     if docs:
         await db.events.insert_many(docs)
@@ -816,7 +838,7 @@ async def bulk_create_events(payload: BulkEventsRequest):
 
 
 @api_router.put("/events/{eid}", response_model=Event)
-async def update_event(eid: str, payload: EventUpdate):
+async def update_event(eid: str, payload: EventUpdate, _u: dict = Depends(require_productor)):
     update = {k: v for k, v in payload.model_dump().items() if v is not None}
     if not update:
         raise HTTPException(400, "No fields to update")
@@ -827,7 +849,7 @@ async def update_event(eid: str, payload: EventUpdate):
 
 
 @api_router.delete("/events/{eid}")
-async def delete_event(eid: str):
+async def delete_event(eid: str, _u: dict = Depends(require_productor)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -835,10 +857,7 @@ async def delete_event(eid: str):
     return {"ok": True}
 
 
-# ---------- Material availability for an event ----------
-@api_router.get("/events/{eid}/availability")
-async def event_availability(eid: str, material_id: str):
-    """Return list of available units for given material in the event's time window."""
+async def _compute_availability(eid: str, material_id: str):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -867,6 +886,13 @@ async def event_availability(eid: str, material_id: str):
             "reason": unavailable_reason,
         })
     return {"units": out, "available_count": sum(1 for x in out if x["available"])}
+
+
+# ---------- Material availability for an event ----------
+@api_router.get("/events/{eid}/availability")
+async def event_availability(eid: str, material_id: str, user: dict = Depends(get_current_user)):
+    """Return list of available units for given material in the event's time window."""
+    return await _compute_availability(eid, material_id)
 
 
 # ---------- Block / unblock material ----------
@@ -951,7 +977,7 @@ async def _block_units(eid: str, material_id: str, unit_ids: List[str]):
 
 
 @api_router.post("/events/{eid}/materials")
-async def block_material(eid: str, payload: BlockMaterialRequest):
+async def block_material(eid: str, payload: BlockMaterialRequest, _u: dict = Depends(require_warehouse)):
     if payload.unit_ids:
         return await _block_units(eid, payload.material_id, payload.unit_ids)
     if payload.quantity is None or payload.quantity < 0:
@@ -961,7 +987,7 @@ async def block_material(eid: str, payload: BlockMaterialRequest):
         await db.events.update_one({"id": eid}, {"$pull": {"materials": {"material_id": payload.material_id}}})
         return await db.events.find_one({"id": eid}, PROJ)
     # auto-pick available units
-    avail = await event_availability(eid, payload.material_id)
+    avail = await _compute_availability(eid, payload.material_id)
     avail_units = [u for u in avail["units"] if u["available"]]
     if len(avail_units) < payload.quantity:
         raise HTTPException(400, f"Solo {len(avail_units)} unidades disponibles, pides {payload.quantity}")
@@ -970,7 +996,7 @@ async def block_material(eid: str, payload: BlockMaterialRequest):
 
 
 @api_router.delete("/events/{eid}/materials/{material_id}")
-async def unblock_material(eid: str, material_id: str):
+async def unblock_material(eid: str, material_id: str, _u: dict = Depends(require_warehouse)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -982,13 +1008,13 @@ async def unblock_material(eid: str, material_id: str):
 
 # ---------- Flightcases (library) ----------
 @api_router.get("/flightcases", response_model=List[Flightcase])
-async def list_flightcases():
+async def list_flightcases(user: dict = Depends(get_current_user)):
     items = await db.flightcases.find({}, PROJ).sort("name", 1).to_list(1000)
     return items
 
 
 @api_router.post("/flightcases", response_model=Flightcase)
-async def create_flightcase(payload: FlightcaseCreate):
+async def create_flightcase(payload: FlightcaseCreate, _u: dict = Depends(require_warehouse)):
     name = payload.name.strip()
     if not name:
         raise HTTPException(400, "Nombre obligatorio")
@@ -1001,7 +1027,7 @@ async def create_flightcase(payload: FlightcaseCreate):
 
 
 @api_router.put("/flightcases/{fid}", response_model=Flightcase)
-async def update_flightcase(fid: str, payload: FlightcaseUpdate):
+async def update_flightcase(fid: str, payload: FlightcaseUpdate, _u: dict = Depends(require_warehouse)):
     fc = await db.flightcases.find_one({"id": fid}, PROJ)
     if not fc:
         raise HTTPException(404, "Flightcase no encontrado")
@@ -1029,7 +1055,7 @@ async def update_flightcase(fid: str, payload: FlightcaseUpdate):
 
 
 @api_router.delete("/flightcases/{fid}")
-async def delete_flightcase(fid: str):
+async def delete_flightcase(fid: str, _u: dict = Depends(require_warehouse)):
     fc = await db.flightcases.find_one({"id": fid}, PROJ)
     if not fc:
         raise HTTPException(404, "Flightcase no encontrado")
@@ -1045,7 +1071,7 @@ async def delete_flightcase(fid: str):
 
 # ---------- Cable distribution per flightcase ----------
 @api_router.put("/events/{eid}/cable-distribution")
-async def set_cable_distribution(eid: str, payload: CableDistributionRequest):
+async def set_cable_distribution(eid: str, payload: CableDistributionRequest, _u: dict = Depends(require_warehouse)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1079,7 +1105,7 @@ async def set_cable_distribution(eid: str, payload: CableDistributionRequest):
 
 
 @api_router.post("/events/{eid}/rentals")
-async def add_rental(eid: str, payload: RentalCreate):
+async def add_rental(eid: str, payload: RentalCreate, _u: dict = Depends(require_warehouse)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1099,7 +1125,7 @@ async def add_rental(eid: str, payload: RentalCreate):
 
 
 @api_router.delete("/events/{eid}/rentals/{rid}")
-async def remove_rental(eid: str, rid: str):
+async def remove_rental(eid: str, rid: str, _u: dict = Depends(require_warehouse)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1138,7 +1164,7 @@ async def event_vehicle_availability(eid: str):
 
 
 @api_router.post("/events/{eid}/vehicles")
-async def add_event_vehicle(eid: str, payload: EventVehicleAdd):
+async def add_event_vehicle(eid: str, payload: EventVehicleAdd, _u: dict = Depends(require_warehouse)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1173,7 +1199,7 @@ async def add_event_vehicle(eid: str, payload: EventVehicleAdd):
 
 
 @api_router.delete("/events/{eid}/vehicles/{vid}")
-async def remove_event_vehicle(eid: str, vid: str):
+async def remove_event_vehicle(eid: str, vid: str, _u: dict = Depends(require_warehouse)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
@@ -1202,14 +1228,14 @@ async def list_packs():
 
 
 @api_router.post("/packs", response_model=Pack)
-async def create_pack(payload: PackCreate):
+async def create_pack(payload: PackCreate, _u: dict = Depends(require_warehouse)):
     p = Pack(**payload.model_dump())
     await db.packs.insert_one(p.model_dump())
     return p
 
 
 @api_router.put("/packs/{pid}", response_model=Pack)
-async def update_pack(pid: str, payload: PackCreate):
+async def update_pack(pid: str, payload: PackCreate, _u: dict = Depends(require_warehouse)):
     res = await db.packs.find_one_and_update({"id": pid}, {"$set": payload.model_dump()}, return_document=True, projection=PROJ)
     if not res:
         raise HTTPException(404, "Pack not found")
@@ -1217,20 +1243,29 @@ async def update_pack(pid: str, payload: PackCreate):
 
 
 @api_router.delete("/packs/{pid}")
-async def delete_pack(pid: str):
+async def delete_pack(pid: str, _u: dict = Depends(require_warehouse)):
     await db.packs.delete_one({"id": pid})
     return {"ok": True}
 
 
+async def _block_by_quantity(eid: str, material_id: str, quantity: int):
+    avail = await _compute_availability(eid, material_id)
+    avail_units = [u for u in avail["units"] if u["available"]]
+    if len(avail_units) < quantity:
+        raise HTTPException(400, f"Solo {len(avail_units)} unidades disponibles, pides {quantity}")
+    chosen = [u["id"] for u in avail_units[:quantity]]
+    return await _block_units(eid, material_id, chosen)
+
+
 @api_router.post("/events/{eid}/apply-pack/{pid}")
-async def apply_pack(eid: str, pid: str):
+async def apply_pack(eid: str, pid: str, _u: dict = Depends(require_warehouse)):
     pack = await db.packs.find_one({"id": pid}, PROJ)
     if not pack:
         raise HTTPException(404, "Pack not found")
     results = []
     for it in pack.get("items", []):
         try:
-            await block_material(eid, BlockMaterialRequest(material_id=it["material_id"], quantity=it["quantity"]))
+            await _block_by_quantity(eid, it["material_id"], it["quantity"])
             results.append({"material_id": it["material_id"], "ok": True})
         except HTTPException as e:
             results.append({"material_id": it["material_id"], "ok": False, "error": e.detail})
@@ -1240,7 +1275,7 @@ async def apply_pack(eid: str, pid: str):
 
 # ---------- Incidents ----------
 @api_router.post("/incidents")
-async def create_incident(payload: IncidentCreate):
+async def create_incident(payload: IncidentCreate, user: dict = Depends(get_current_user)):
     if not payload.unit_id and not payload.vehicle_id:
         raise HTTPException(400, "unit_id o vehicle_id requerido")
     if payload.unit_id and payload.vehicle_id:
@@ -1274,7 +1309,7 @@ async def create_incident(payload: IncidentCreate):
 
 
 @api_router.get("/incidents")
-async def list_incidents():
+async def list_incidents(user: dict = Depends(get_current_user)):
     """Returns units + vehicles currently in broken/repair status, with their latest log."""
     out = []
     units = await db.units.find({"status": {"$in": ["broken", "repair"]}}, PROJ).to_list(2000)
@@ -1300,7 +1335,8 @@ async def list_incidents():
 
 @api_router.get("/incident-logs")
 async def list_incident_logs(unit_id: Optional[str] = None, material_id: Optional[str] = None,
-                             vehicle_id: Optional[str] = None, type: Optional[str] = None):
+                             vehicle_id: Optional[str] = None, type: Optional[str] = None,
+                             user: dict = Depends(get_current_user)):
     """Flat list of all incident logs with material/vehicle info, optionally filtered."""
     q = {}
     if type:
@@ -1353,13 +1389,13 @@ async def unit_history(unit_id: str):
 
 
 @api_router.get("/vehicles/{vid}/history")
-async def vehicle_history(vid: str):
+async def vehicle_history(vid: str, user: dict = Depends(get_current_user)):
     logs = await db.incident_logs.find({"vehicle_id": vid}, PROJ).sort("created_at", -1).to_list(500)
     return logs
 
 
 @api_router.post("/incidents/{unit_id}/resolve")
-async def resolve_incident(unit_id: str, payload: IncidentResolve):
+async def resolve_incident(unit_id: str, payload: IncidentResolve, _u: dict = Depends(require_warehouse)):
     u = await db.units.find_one({"id": unit_id}, PROJ)
     if not u:
         raise HTTPException(404, "Unit not found")
@@ -1373,7 +1409,7 @@ async def resolve_incident(unit_id: str, payload: IncidentResolve):
 
 
 @api_router.post("/vehicle-incidents/{vid}/resolve")
-async def resolve_vehicle_incident(vid: str, payload: IncidentResolve):
+async def resolve_vehicle_incident(vid: str, payload: IncidentResolve, _u: dict = Depends(require_warehouse)):
     v = await db.vehicles.find_one({"id": vid}, PROJ)
     if not v:
         raise HTTPException(404, "Vehicle not found")
@@ -1399,7 +1435,7 @@ async def update_incident(unit_id: str, payload: IncidentResolve):
 
 # ---------- File upload ----------
 @api_router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     ext = file.filename.split(".")[-1] if "." in file.filename else "bin"
     fid = str(uuid.uuid4())
     path = f"{APP_NAME}/uploads/{fid}.{ext}"
@@ -1633,10 +1669,12 @@ def _build_pdf(event: dict, subitem_name_map: dict = None) -> bytes:
 
 
 @api_router.get("/events/{eid}/export")
-async def export_event_pdf(eid: str):
+async def export_event_pdf(eid: str, user: dict = Depends(get_current_user)):
     ev = await db.events.find_one({"id": eid}, PROJ)
     if not ev:
         raise HTTPException(404, "Event not found")
+    if user.get("role") == "tecnico" and user["id"] not in (ev.get("assigned_technicians") or []):
+        raise HTTPException(403, "Sin acceso a este evento")
     # build subitem name map: unit_id -> material name
     sub_unit_ids = set()
     for em in ev.get("materials", []):
@@ -1668,7 +1706,7 @@ async def export_event_pdf(eid: str):
 
 # ---------- Stats ----------
 @api_router.get("/stats")
-async def stats():
+async def stats(user: dict = Depends(get_current_user)):
     total_materials = await db.materials.count_documents({})
     total_units = await db.units.count_documents({})
     total_events = await db.events.count_documents({})
@@ -1697,6 +1735,210 @@ async def root():
     return {"app": "Stock Eventos", "ok": True}
 
 
+# ============================================================
+# AUTH
+# ============================================================
+
+
+async def seed_admin():
+    """Create admin user if no users exist."""
+    if await db.users.count_documents({}) == 0:
+        admin_email = os.environ.get("ADMIN_EMAIL", "admin@example.com").lower()
+        admin_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+        admin_name = os.environ.get("ADMIN_NAME", "Admin")
+        u = User(email=admin_email, password_hash=hash_password(admin_password),
+                 name=admin_name, role="productor")
+        await db.users.insert_one(u.model_dump())
+        logger.info(f"Admin sembrado: {admin_email}")
+    # ensure indexes
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.password_reset_tokens.create_index("expires_at", expireAfterSeconds=0)
+    except Exception:
+        pass
+
+
+def _public_user(u: dict) -> dict:
+    return {"id": u["id"], "email": u["email"], "name": u.get("name", ""),
+            "role": u.get("role", "tecnico"), "active": u.get("active", True)}
+
+
+@api_router.post("/auth/login")
+async def auth_login(payload: LoginRequest, response: Response):
+    email = payload.email.strip().lower()
+    user = await db.users.find_one({"email": email}, PROJ)
+    if not user or not user.get("active", True):
+        raise HTTPException(401, "Credenciales inválidas")
+    if not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(401, "Credenciales inválidas")
+    access = create_access_token(user["id"], user["email"])
+    refresh = create_refresh_token(user["id"])
+    set_auth_cookies(response, access, refresh)
+    return {"user": _public_user(user), "access_token": access, "refresh_token": refresh}
+
+
+@api_router.post("/auth/logout")
+async def auth_logout(response: Response, user: dict = Depends(get_current_user)):
+    clear_auth_cookies(response)
+    return {"ok": True}
+
+
+@api_router.get("/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)):
+    return _public_user(user)
+
+
+@api_router.post("/auth/refresh")
+async def auth_refresh(request: Request, response: Response):
+    token = request.cookies.get("refresh_token")
+    if not token:
+        auth_h = request.headers.get("Authorization", "")
+        if auth_h.startswith("Bearer "):
+            token = auth_h[7:]
+    if not token:
+        raise HTTPException(401, "No refresh token")
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "refresh":
+            raise HTTPException(401, "Token inválido")
+    except _jwt.ExpiredSignatureError:
+        raise HTTPException(401, "Token expirado")
+    except _jwt.InvalidTokenError:
+        raise HTTPException(401, "Token inválido")
+    user = await db.users.find_one({"id": payload["sub"]}, PROJ)
+    if not user or not user.get("active", True):
+        raise HTTPException(401, "Usuario no válido")
+    access = create_access_token(user["id"], user["email"])
+    response.set_cookie("access_token", access, httponly=True, secure=False,
+                        samesite="lax", max_age=60 * 60 * 24 * 7, path="/")
+    return {"access_token": access}
+
+
+@api_router.post("/auth/change-password")
+async def change_password(payload: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    full = await db.users.find_one({"id": user["id"]}, PROJ)
+    if not verify_password(payload.old_password, full["password_hash"]):
+        raise HTTPException(400, "Contraseña actual incorrecta")
+    if len(payload.new_password) < 8:
+        raise HTTPException(400, "La nueva contraseña debe tener al menos 8 caracteres")
+    await db.users.update_one({"id": user["id"]},
+                              {"$set": {"password_hash": hash_password(payload.new_password)}})
+    return {"ok": True}
+
+
+@api_router.post("/auth/forgot-password")
+async def forgot_password(payload: ForgotPasswordRequest):
+    email = payload.email.strip().lower()
+    user = await db.users.find_one({"email": email}, PROJ)
+    # always 200 to avoid email enumeration
+    if user:
+        tok = gen_reset_token()
+        await db.password_reset_tokens.insert_one({
+            "token": tok, "user_id": user["id"],
+            "expires_at": datetime.now(timezone.utc) + timedelta(hours=1),
+            "used": False,
+        })
+        # TODO: integrate Resend later
+        logger.info(f"[PASSWORD RESET] {email} → token: {tok}")
+    return {"ok": True}
+
+
+@api_router.post("/auth/reset-password")
+async def reset_password(payload: ResetPasswordRequest):
+    rec = await db.password_reset_tokens.find_one({"token": payload.token, "used": False}, PROJ)
+    if not rec:
+        raise HTTPException(400, "Token inválido o ya usado")
+    exp = rec["expires_at"]
+    if isinstance(exp, str):
+        exp = datetime.fromisoformat(exp)
+    if exp.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(400, "Token expirado")
+    if len(payload.new_password) < 8:
+        raise HTTPException(400, "La nueva contraseña debe tener al menos 8 caracteres")
+    await db.users.update_one({"id": rec["user_id"]},
+                              {"$set": {"password_hash": hash_password(payload.new_password)}})
+    await db.password_reset_tokens.update_one({"token": payload.token}, {"$set": {"used": True}})
+    return {"ok": True}
+
+
+# ---------- User management (productor only) ----------
+@api_router.get("/users")
+async def list_users(user: dict = Depends(require_role("productor"))):
+    users = await db.users.find({}, PROJ).sort("name", 1).to_list(500)
+    return [_public_user(u) for u in users]
+
+
+@api_router.get("/technicians")
+async def list_technicians(user: dict = Depends(get_current_user)):
+    """List of technicians (and productores) for event assignment. Visible to productor + almacen."""
+    if user.get("role") == "tecnico":
+        raise HTTPException(403, "Sin permisos")
+    users = await db.users.find({"role": {"$in": ["tecnico", "productor"]}, "active": True}, PROJ).sort("name", 1).to_list(500)
+    return [_public_user(u) for u in users]
+
+
+@api_router.post("/users")
+async def create_user(payload: RegisterRequest, user: dict = Depends(require_role("productor"))):
+    email = payload.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "Email inválido")
+    if payload.role not in ROLES:
+        raise HTTPException(400, "Rol inválido")
+    if len(payload.password) < 8:
+        raise HTTPException(400, "Contraseña mínimo 8 caracteres")
+    if await db.users.find_one({"email": email}, PROJ):
+        raise HTTPException(400, "Ya existe un usuario con ese email")
+    u = User(email=email, password_hash=hash_password(payload.password),
+             name=payload.name.strip(), role=payload.role)
+    await db.users.insert_one(u.model_dump())
+    return _public_user(u.model_dump())
+
+
+@api_router.put("/users/{uid}")
+async def update_user(uid: str, payload: UpdateUserRequest, user: dict = Depends(require_role("productor"))):
+    target = await db.users.find_one({"id": uid}, PROJ)
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    upd = {}
+    if payload.name is not None:
+        upd["name"] = payload.name.strip()
+    if payload.role is not None:
+        if payload.role not in ROLES:
+            raise HTTPException(400, "Rol inválido")
+        upd["role"] = payload.role
+    if payload.active is not None:
+        # don't allow deactivating yourself
+        if uid == user["id"] and payload.active is False:
+            raise HTTPException(400, "No puedes desactivarte a ti mismo")
+        upd["active"] = payload.active
+    if upd:
+        await db.users.update_one({"id": uid}, {"$set": upd})
+    return _public_user(await db.users.find_one({"id": uid}, PROJ))
+
+
+@api_router.post("/users/{uid}/reset-password")
+async def admin_reset_password(uid: str, payload: dict, user: dict = Depends(require_role("productor"))):
+    new_password = payload.get("new_password", "")
+    if len(new_password) < 8:
+        raise HTTPException(400, "Contraseña mínimo 8 caracteres")
+    target = await db.users.find_one({"id": uid}, PROJ)
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    await db.users.update_one({"id": uid}, {"$set": {"password_hash": hash_password(new_password)}})
+    return {"ok": True}
+
+
+@api_router.delete("/users/{uid}")
+async def delete_user(uid: str, user: dict = Depends(require_role("productor"))):
+    if uid == user["id"]:
+        raise HTTPException(400, "No puedes eliminarte a ti mismo")
+    target = await db.users.find_one({"id": uid}, PROJ)
+    if not target:
+        raise HTTPException(404, "Usuario no encontrado")
+    await db.users.delete_one({"id": uid})
+    return {"ok": True}
+
+
 app.include_router(api_router)
 
 app.add_middleware(CORSMiddleware, allow_credentials=True,
@@ -1711,6 +1953,7 @@ logger = logging.getLogger(__name__)
 async def on_startup():
     init_storage()
     await seed_and_migrate()
+    await seed_admin()
     logger.info("Startup complete")
 
 

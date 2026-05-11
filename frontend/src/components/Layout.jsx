@@ -1,26 +1,38 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { LayoutDashboard, Boxes, CalendarDays, Building2, Wrench, Package, GanttChartSquare, Box, Truck } from "lucide-react";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { LayoutDashboard, Boxes, CalendarDays, Building2, Wrench, Package, GanttChartSquare, Box, Truck, Users as UsersIcon, LogOut } from "lucide-react";
+import { useAuth, ROLE_LABEL } from "../lib/auth";
 
 const navItems = [
-  { to: "/", icon: LayoutDashboard, label: "Dashboard", exact: true },
-  { to: "/inventario", icon: Boxes, label: "Inventario" },
-  { to: "/eventos", icon: CalendarDays, label: "Eventos" },
-  { to: "/timeline", icon: GanttChartSquare, label: "Timeline" },
-  { to: "/packs", icon: Package, label: "Packs" },
-  { to: "/flightcases", icon: Box, label: "Flightcases" },
-  { to: "/vehiculos", icon: Truck, label: "Vehículos" },
-  { to: "/incidencias", icon: Wrench, label: "Incidencias" },
-  { to: "/proveedores", icon: Building2, label: "Proveedores" },
+  { to: "/", icon: LayoutDashboard, label: "Dashboard", exact: true, roles: ["productor", "almacen", "tecnico"] },
+  { to: "/inventario", icon: Boxes, label: "Inventario", roles: ["productor", "almacen"] },
+  { to: "/eventos", icon: CalendarDays, label: "Eventos", roles: ["productor", "almacen", "tecnico"] },
+  { to: "/timeline", icon: GanttChartSquare, label: "Timeline", roles: ["productor", "almacen"] },
+  { to: "/packs", icon: Package, label: "Packs", roles: ["productor", "almacen"] },
+  { to: "/flightcases", icon: Box, label: "Flightcases", roles: ["productor", "almacen"] },
+  { to: "/vehiculos", icon: Truck, label: "Vehículos", roles: ["productor", "almacen"] },
+  { to: "/incidencias", icon: Wrench, label: "Incidencias", roles: ["productor", "almacen", "tecnico"] },
+  { to: "/proveedores", icon: Building2, label: "Proveedores", roles: ["productor", "almacen"] },
+  { to: "/usuarios", icon: UsersIcon, label: "Usuarios", roles: ["productor"] },
 ];
 
 export default function Layout() {
+  const { user, logout } = useAuth();
+  const nav = useNavigate();
+  const role = user?.role;
+  const items = navItems.filter((it) => !it.roles || it.roles.includes(role));
+
+  const doLogout = async () => {
+    await logout();
+    nav("/login");
+  };
+
   return (
     <div className="app-shell" data-testid="app-shell">
       <aside className="sidebar">
         <h1>Stock · Eventos</h1>
         <div className="brand-sub">control de material</div>
         <nav>
-          {navItems.map((it) => (
+          {items.map((it) => (
             <NavLink
               key={it.to}
               to={it.to}
@@ -33,8 +45,19 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div style={{ marginTop: 32, padding: "12px 14px", borderTop: "1px solid var(--sidebar-line)", fontFamily: "JetBrains Mono, monospace", fontSize: 10, color: "#a8a29e", letterSpacing: "0.1em" }}>
-          v2.0 · uso interno
+        <div style={{ marginTop: "auto" }}>
+          {user && (
+            <div style={{ padding: "14px", borderTop: "1px solid var(--sidebar-line)", fontSize: 12 }}>
+              <div style={{ color: "#fafaf9", fontWeight: 600, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} data-testid="current-user-name">{user.name || user.email}</div>
+              <div style={{ color: "#a8a29e", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", fontSize: 10, letterSpacing: "0.1em" }} data-testid="current-user-role">{ROLE_LABEL[role] || role}</div>
+              <button onClick={doLogout} data-testid="logout-btn" style={{ marginTop: 10, background: "transparent", border: "1px solid var(--sidebar-line)", color: "#fafaf9", padding: "6px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "inherit" }}>
+                <LogOut size={12} /> Cerrar sesión
+              </button>
+            </div>
+          )}
+          <div style={{ padding: "10px 14px", fontFamily: "JetBrains Mono, monospace", fontSize: 10, color: "#a8a29e", letterSpacing: "0.1em" }}>
+            v2.1 · uso interno
+          </div>
         </div>
       </aside>
       <main className="main">

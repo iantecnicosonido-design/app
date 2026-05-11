@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { toast } from "sonner";
+import { useAuth, can } from "../lib/auth";
 
 const empty = {
   name: "", type: "alquiler", client_name: "", client_contact: "", reference: "",
@@ -23,6 +24,8 @@ const MONTHS_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio
 const DAYS_ES = ["LUN", "MAR", "MIÉ", "JUE", "VIE", "SÁB", "DOM"];
 
 export default function Events() {
+  const { user } = useAuth();
+  const canCreate = can(user, "event_edit_ficha");
   const [events, setEvents] = useState([]);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(empty);
@@ -62,7 +65,7 @@ export default function Events() {
           <h2 className="page-title">Eventos</h2>
           <p className="page-sub">{events.length} totales · {events.filter((e) => e.status === "abierto").length} abiertos</p>
         </div>
-        <Button onClick={() => setOpen(true)} style={{ background: "var(--accent)" }} data-testid="new-event-btn"><Plus size={16} /> Nuevo evento</Button>
+        {canCreate && <Button onClick={() => setOpen(true)} style={{ background: "var(--accent)" }} data-testid="new-event-btn"><Plus size={16} /> Nuevo evento</Button>}
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>

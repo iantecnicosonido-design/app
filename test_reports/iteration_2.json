@@ -1,0 +1,54 @@
+{
+  "summary": "Auth system + RBAC tested end-to-end. Backend: 24/24 pytest passed (login/me/refresh/forgot/change-password + role enforcement on events, materials, users, incidents, export, close/reopen). Frontend: 7/7 Playwright flows passed (unauth redirect to /login, admin login, productor sidebar with 10 items, /usuarios new tecnico creation, logout, tecnico login + restricted sidebar with only Dashboard/Eventos/Incidencias).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/forgot-password", "issue": "Resend email integration is NOT YET implemented — token is only logged to backend.err.log under '[PASSWORD RESET]'. Confirmed: log entry written and response is 200 for both known and unknown emails (no enumeration). Acceptable for current MVP, but should be replaced before production."},
+      {"endpoint": "POST /api/auth/refresh", "issue": "Sets access_token cookie max_age=7d but in auth.set_auth_cookies the same access_token cookie uses ACCESS_MINUTES*60s (7d via ACCESS_MINUTES=7*1440). Consistent in practice but the magic number 60*60*24*7 is duplicated; minor maintainability nit."},
+      {"endpoint": "Auth lifetimes", "issue": "ACCESS_MINUTES=10080 (7 days). Long-lived access tokens reduce the value of having refresh tokens. Consider shortening (e.g. 15-60 min) and relying on refresh."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "User dialog", "issues": ["Radix DialogContent emits warning: 'Missing Description or aria-describedby'. Non-blocking but should add DialogDescription for accessibility."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth.py",
+    "/app/backend/tests/test_stock_eventos.py",
+    "/app/test_reports/pytest/auth_results.xml"
+  ],
+  "action_items": [
+    "(Optional) Add DialogDescription / aria-describedby in Users.jsx and any other Dialogs to silence Radix a11y warnings.",
+    "(Optional) Reduce ACCESS_MINUTES to 15-60 min and use refresh-token rotation in frontend api interceptor.",
+    "(Pending feature, not a bug) Integrate Resend (or any SMTP) to actually email the reset-password token instead of logging it."
+  ],
+  "critical_code_review_comments": [
+    "auth.py uses bcrypt directly with bcrypt.gensalt() → hashes start with $2b$ ✓ (verified by login flow).",
+    "Login sets httpOnly cookies AND returns access_token in body for Bearer fallback ✓. CORS middleware has allow_credentials=True and reads CORS_ORIGINS from env ✓.",
+    "seed_admin runs on startup and uses idempotent upsert behavior (must verify it updates password if admin user already exists with a different hash — recommend reviewing /app/backend/server.py seed_admin code).",
+    "Tecnico filtering: list_events queries {assigned_technicians: user.id} for tecnicos, get_event/export check membership ✓.",
+    "Almacen correctly restricted from POST/PUT/DELETE /api/events and /api/users via require_productor; can use require_warehouse paths for materials/rentals/vehicles/close/reopen ✓.",
+    "POST /api/users validates email/role/password length and rejects duplicates ✓.",
+    "Change-password requires correct old + min 8 chars ✓.",
+    "Forgot-password returns 200 regardless of email existence (no enumeration) ✓, logs token to backend log ✓.",
+    "No mongodb _id leaks anywhere in auth/users responses (PROJ projection used consistently) ✓.",
+    "Frontend Login.jsx uses data-testid for email/password/submit; Users.jsx uses new-user-btn / user-email / user-name / user-role / user-password / save-user-btn ✓.",
+    "Layout.jsx filters nav items by user.role correctly ✓.",
+    "Minor: no rate-limit / brute-force lockout in /api/auth/login — multiple bad-password attempts return 401 without throttling. Acceptable for internal use but worth noting (playbook mentions lockout after 5 fails).",
+    "Minor: JWT_SECRET is read via os.environ['JWT_SECRET'] inside _secret() — if env var missing the whole auth subsystem crashes at first request; consider a clearer startup-time check."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin: iantecnicosonido@gmail.com / EdisonBryan2026! (productor). Ephemeral test users created and deleted within tests (tecnico_<ts>@test.com, warehouse_<ts>@test.com, Test1234!).",
+  "seed_data_creation": "All test users created with timestamped emails and deleted in the final cleanup test (test_zz_cleanup...). UI test created ui_tec_<ts>@test.com and deleted it via API. No leftover data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auth system is fully working. test_auth.py covers 24 cases: admin login, /auth/me 401 vs Bearer, /events 401 + productor full list, user CRUD via /api/users (productor only), tecnico restricted view + assignment flow, tecnico 403 on create-event/block-material, tecnico 200 on export-if-assigned/403-if-not/incident creation, almacen 200 block/close/reopen + 403 on edit-event/create-event/manage-users, forgot-password 200 (logs token), change-password old-incorrect 400 / correct 200 + revert. To re-run: REACT_APP_BACKEND_URL=https://material-calendar.preview.emergentagent.com python -m pytest /app/backend/tests/test_auth.py -v.",
+  "rca of the issue": "No issues found requiring RCA. Implementation is correct and matches the spec."
+}

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { api, API, formatDate } from "../lib/api";
-import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck } from "lucide-react";
+import { ArrowLeft, FileDown, Lock, Unlock, Plus, Trash2, Save, Search, Package, Pencil, Box, Truck, UserPlus, Users as UsersIcon } from "lucide-react";
+import { useAuth, can } from "../lib/auth";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -20,6 +21,10 @@ const fmtDt = (s) => {
 };
 
 export default function EventDetail() {
+  const { user } = useAuth();
+  const canEditFicha = can(user, "event_edit_ficha");
+  const canMaterial = can(user, "event_material");
+  const canClose = can(user, "event_close");
   const { id } = useParams();
   const navigate = useNavigate();
   const [ev, setEv] = useState(null);
@@ -49,6 +54,9 @@ export default function EventDetail() {
   const [vehOpen, setVehOpen] = useState(false);
   const [vehAvail, setVehAvail] = useState([]);
   const [vehForm, setVehForm] = useState({ type: "owned", vehicle_id: "", name: "", plate: "", notes: "" });
+  const [technicians, setTechnicians] = useState([]);
+  const [techOpen, setTechOpen] = useState(false);
+  const [techSel, setTechSel] = useState([]);
 
   const load = async () => {
     const r = await api.get(`/events/${id}`);
@@ -63,6 +71,7 @@ export default function EventDetail() {
     api.get("/units").then((r) => setAllUnits(r.data));
     api.get("/categories").then((r) => setCategories(r.data));
     api.get("/flightcases").then((r) => setFlightcases(r.data));
+    api.get("/technicians").then((r) => setTechnicians(r.data)).catch(() => {});
     /* eslint-disable-next-line */
   }, [id]);
 
@@ -235,6 +244,20 @@ export default function EventDetail() {
     } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
   };
 
+  const toggleTech = (tid) => {
+    if (techSel.includes(tid)) setTechSel(techSel.filter((x) => x !== tid));
+    else setTechSel([...techSel, tid]);
+  };
+
+  const saveTechs = async () => {
+    try {
+      const r = await api.put(`/events/${id}`, { ...ev, assigned_technicians: techSel });
+      setEv(r.data);
+      setTechOpen(false);
+      toast.success("Técnicos actualizados");
+    } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+  };
+
   const applyPack = async (pid) => {
     try {
       const r = await api.post(`/events/${id}/apply-pack/${pid}`);
@@ -298,15 +321,15 @@ export default function EventDetail() {
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Button variant="outline" onClick={exportPDF} data-testid="export-pdf-btn"><FileDown size={16} /> PDF</Button>
-          {!isClosed ? <Button onClick={closeEvent} style={{ background: "#1c1917" }}><Lock size={16} /> Cerrar</Button> : <Button onClick={reopenEvent} variant="outline"><Unlock size={16} /> Reabrir</Button>}
-          <Button variant="ghost" onClick={deleteEvent}><Trash2 size={16} color="#b91c1c" /></Button>
+          {canClose && (!isClosed ? <Button onClick={closeEvent} style={{ background: "#1c1917" }}><Lock size={16} /> Cerrar</Button> : <Button onClick={reopenEvent} variant="outline"><Unlock size={16} /> Reabrir</Button>)}
+          {canEditFicha && <Button variant="ghost" onClick={deleteEvent}><Trash2 size={16} color="#b91c1c" /></Button>}
         </div>
       </div>
 
       <div className="card-paper" style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Ficha del evento</h3>
-          {!isClosed && !edit && <Button variant="ghost" size="sm" onClick={() => setEdit({ ...ev })}>Editar</Button>}
+          {canEditFicha && !isClosed && !edit && <Button variant="ghost" size="sm" onClick={() => setEdit({ ...ev })}>Editar</Button>}
           {edit && <div style={{ display: "flex", gap: 8 }}><Button variant="outline" size="sm" onClick={() => setEdit(null)}>Cancelar</Button><Button size="sm" onClick={saveEdit} style={{ background: "var(--accent)" }}><Save size={14} /> Guardar</Button></div>}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
@@ -347,7 +370,7 @@ export default function EventDetail() {
       <div className="card-paper" style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material bloqueado del stock</h3>
-          {!isClosed && (
+          {canMaterial && !isClosed && (
             <div style={{ display: "flex", gap: 8 }}>
               <Button onClick={() => setPackOpen(true)} variant="outline" size="sm" data-testid="apply-pack-btn"><Package size={14} /> Aplicar pack</Button>
               <Button onClick={() => setMatOpen(true)} style={{ background: "var(--accent)" }} size="sm" data-testid="block-material-btn"><Plus size={14} /> Bloquear material</Button>
@@ -366,9 +389,9 @@ export default function EventDetail() {
                       <div style={{ fontWeight: 500 }}>{m.name}</div>
                       <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13 }}>x{m.units?.length || 0}</div>
                       <div style={{ textAlign: "right", display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                        {!isClosed && c.has_unit_refs === false && <Button size="icon" variant="ghost" onClick={() => startDistribute(m)} title="Distribuir en flightcases"><Box size={14} /></Button>}
-                        {!isClosed && <Button size="icon" variant="ghost" onClick={() => startEditBlocked(m)} title="Editar unidades"><Pencil size={14} /></Button>}
-                        {!isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)} title="Quitar todo"><Trash2 size={14} /></Button>}
+                        {canMaterial && !isClosed && c.has_unit_refs === false && <Button size="icon" variant="ghost" onClick={() => startDistribute(m)} title="Distribuir en flightcases"><Box size={14} /></Button>}
+                        {canMaterial && !isClosed && <Button size="icon" variant="ghost" onClick={() => startEditBlocked(m)} title="Editar unidades"><Pencil size={14} /></Button>}
+                        {canMaterial && !isClosed && <Button size="icon" variant="ghost" onClick={() => unblockMaterial(m.material_id)} title="Quitar todo"><Trash2 size={14} /></Button>}
                       </div>
                     </div>
                     {c.has_unit_refs !== false && (
@@ -422,8 +445,31 @@ export default function EventDetail() {
 
       <div className="card-paper" style={{ marginBottom: 18 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}><UsersIcon size={18} /> Técnicos asignados</h3>
+          {canEditFicha && !isClosed && (
+            <Button size="sm" onClick={() => { setTechSel(ev.assigned_technicians || []); setTechOpen(true); }} style={{ background: "var(--accent)" }} data-testid="assign-tech-btn"><UserPlus size={14} /> Asignar</Button>
+          )}
+        </div>
+        {(ev.assigned_technicians || []).length === 0 ? (
+          <p style={{ color: "var(--ink-mute)", fontSize: 14 }}>Sin técnicos asignados.</p>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {(ev.assigned_technicians || []).map((tid) => {
+              const t = technicians.find((x) => x.id === tid);
+              return (
+                <span key={tid} style={{ padding: "6px 12px", borderRadius: 999, background: "#dcfce7", color: "#166534", fontSize: 13, fontWeight: 500 }}>
+                  {t ? (t.name || t.email) : tid}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="card-paper" style={{ marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}><Truck size={18} /> Vehículos</h3>
-          {!isClosed && <Button onClick={openAddVehicle} style={{ background: "var(--accent)" }} size="sm" data-testid="add-vehicle-event-btn"><Plus size={14} /> Añadir vehículo</Button>}
+          {canMaterial && !isClosed && <Button onClick={openAddVehicle} style={{ background: "var(--accent)" }} size="sm" data-testid="add-vehicle-event-btn"><Plus size={14} /> Añadir vehículo</Button>}
         </div>
         {(ev.vehicles || []).length === 0 ? (
           <p style={{ color: "var(--ink-mute)", fontSize: 14 }}>Sin vehículos asignados.</p>
@@ -438,7 +484,7 @@ export default function EventDetail() {
               <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", padding: "3px 10px", borderRadius: 999, background: vh.type === "owned" ? "#dcfce7" : "#e0e7ff", color: vh.type === "owned" ? "#166534" : "#3730a3", textAlign: "center" }}>
                 {vh.type === "owned" ? "PROPIO" : "ALQUILER"}
               </span>
-              <div style={{ textAlign: "right" }}>{!isClosed && <Button size="icon" variant="ghost" onClick={() => removeVehicle(vh.id)}><Trash2 size={14} /></Button>}</div>
+              <div style={{ textAlign: "right" }}>{canMaterial && !isClosed && <Button size="icon" variant="ghost" onClick={() => removeVehicle(vh.id)}><Trash2 size={14} /></Button>}</div>
             </div>
           ))
         )}
@@ -447,14 +493,14 @@ export default function EventDetail() {
       <div className="card-paper">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Material de alquiler externo</h3>
-          {!isClosed && <Button onClick={() => setRentOpen(true)} style={{ background: "var(--accent)" }} size="sm"><Plus size={14} /> Añadir alquiler</Button>}
+          {canMaterial && !isClosed && <Button onClick={() => setRentOpen(true)} style={{ background: "var(--accent)" }} size="sm"><Plus size={14} /> Añadir alquiler</Button>}
         </div>
         {ev.rentals.length === 0 ? <p style={{ color: "var(--ink-mute)", fontSize: 14 }}>Sin material de alquiler externo.</p> : ev.rentals.map((r) => (
           <div key={r.id} className="row-hover" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 60px 60px", padding: "10px 4px", borderBottom: "1px solid var(--line)", alignItems: "center", gap: 8 }}>
             <div><div style={{ fontWeight: 500 }}>{r.name}</div>{r.notes && <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{r.notes}</div>}</div>
             <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>{r.provider_name || "—"}</div>
             <div style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13 }}>x{r.quantity}</div>
-            <div style={{ textAlign: "right" }}>{!isClosed && <Button size="icon" variant="ghost" onClick={() => removeRental(r.id)}><Trash2 size={14} /></Button>}</div>
+            <div style={{ textAlign: "right" }}>{canMaterial && !isClosed && <Button size="icon" variant="ghost" onClick={() => removeRental(r.id)}><Trash2 size={14} /></Button>}</div>
           </div>
         ))}
       </div>
@@ -588,6 +634,34 @@ export default function EventDetail() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setVehOpen(false)}>Cancelar</Button>
             <Button onClick={submitVehicle} style={{ background: "var(--accent)" }} data-testid="confirm-add-vehicle-btn">Añadir</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign technicians */}
+      <Dialog open={techOpen} onOpenChange={setTechOpen}>
+        <DialogContent style={{ maxWidth: 560 }} data-testid="assign-tech-dialog">
+          <DialogHeader><DialogTitle>Asignar técnicos al evento</DialogTitle></DialogHeader>
+          <div style={{ display: "grid", gap: 6, maxHeight: 420, overflowY: "auto", padding: 4 }}>
+            {technicians.length === 0 ? (
+              <p style={{ color: "var(--ink-mute)", fontSize: 13 }}>No hay técnicos. Crea usuarios en <b>Usuarios</b>.</p>
+            ) : technicians.map((t) => {
+              const checked = techSel.includes(t.id);
+              return (
+                <label key={t.id} style={{ display: "grid", gridTemplateColumns: "24px 1fr 100px", gap: 8, padding: "10px 12px", borderRadius: 8, border: "1px solid var(--line)", background: checked ? "#fffbeb" : "#fff", cursor: "pointer", alignItems: "center" }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleTech(t.id)} data-testid={`tech-${t.email}`} />
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{t.name || t.email}</div>
+                    <div style={{ fontSize: 11, color: "var(--ink-mute)" }}>{t.email}</div>
+                  </div>
+                  <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 999, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", background: t.role === "productor" ? "#fef3c7" : "#dcfce7", color: t.role === "productor" ? "#92400e" : "#166534", textAlign: "center" }}>{t.role}</span>
+                </label>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTechOpen(false)}>Cancelar</Button>
+            <Button onClick={saveTechs} style={{ background: "var(--accent)" }} data-testid="save-tech-btn">Guardar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
