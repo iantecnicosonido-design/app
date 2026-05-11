@@ -352,7 +352,7 @@ export default function EventDetail() {
           <p className="page-sub" style={{ margin: 0 }}>{ev.client_name || "Sin cliente"} {ev.reference && `· Ref. ${ev.reference}`}</p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {/* Entrega / Devolución (alquileres simples) */}
+          {/* Entrega / Devolución / Comprobación (alquileres simples) */}
           {ev.type === "alquiler" && (user?.role === "almacen" || user?.role === "productor") && (
             <>
               {!ev.delivery?.delivered_at && !isClosed && (
@@ -361,8 +361,13 @@ export default function EventDetail() {
                 </Button>
               )}
               {ev.delivery?.delivered_at && !ev.return_info?.returned_at && !isClosed && (
-                <Button onClick={() => setReturnOpen(true)} style={{ background: "#166534" }} data-testid="return-btn">
+                <Button onClick={() => setReturnOpen(true)} style={{ background: "#1e3a8a" }} data-testid="return-btn">
                   <PackageCheck size={14} /> Devolución
+                </Button>
+              )}
+              {ev.return_info?.returned_at && !ev.check_info?.checked_at && !isClosed && (
+                <Button onClick={() => setCheckOpen(true)} style={{ background: "#166534" }} data-testid="check-btn">
+                  <PackageCheck size={14} /> Comprobación
                 </Button>
               )}
             </>
