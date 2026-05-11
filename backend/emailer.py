@@ -1,24 +1,22 @@
-"""Resend email helper. Non-blocking, with safe fallback if Resend fails."""
+"""Brevo (Sendinblue) email helper. Non-blocking, with safe fallback if Brevo fails."""
 import os
-import asyncio
 import base64
 import logging
 from typing import Optional, List, Dict, Any
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-try:
-    import resend  # type: ignore
-except ImportError:
-    resend = None
+BREVO_API_URL = "https://api.brevo.com/v3/smtp/email"
 
 
 def _configured() -> bool:
-    return bool(os.environ.get("RESEND_API_KEY") and resend is not None)
+    return bool(os.environ.get("BREVO_API_KEY"))
 
 
 def _from_address() -> str:
-    return os.environ.get("SENDER_EMAIL", "onboarding@resend.dev")
+    return os.environ.get("SENDER_EMAIL", "noreply@edisonrent.com")
 
 
 def _from_name() -> str:
@@ -32,38 +30,59 @@ async def send_email(
     text: Optional[str] = None,
     attachments: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[str]:
-    """Send an email via Resend. Returns email_id on success, None on failure.
+    """Send an email via Brevo. Returns messageId on success, None on failure.
     Never raises (errors are logged) so callers don't crash on email issues.
-    attachments: list of dicts with keys 'filename' and 'content' (bytes).
+    attachments: list of dicts with keys 'filename' and 'content' (bytes or base64 str).
     """
     if not _configured():
-        logger.warning("[EMAIL skipped] Resend not configured. Subject=%s to=%s", subject, to)
+        logger.warning("[EMAIL skipped] Brevo not configured. Subject=%s to=%s", subject, to)
         return None
 
-    resend.api_key = os.environ["RESEND_API_KEY"]
-    params: Dict[str, Any] = {
-        "from": f"{_from_name()} <{_from_address()}>",
-        "to": to if isinstance(to, list) else [to],
+    # Normalise recipients to list of {email, name?} dicts
+    to_list = to if isinstance(to, list) else [to]
+    recipients = [{"email": addr} for addr in to_list if addr]
+    if not recipients:
+        logger.warning("[EMAIL skipped] No recipients. Subject=%s", subject)
+        return None
+
+    payload: Dict[str, Any] = {
+        "sender": {"name": _from_name(), "email": _from_address()},
+        "to": recipients,
         "subject": subject,
-        "html": html,
+        "htmlContent": html,
     }
     if text:
-        params["text"] = text
+        payload["textContent"] = text
     if attachments:
-        params["attachments"] = [
+        payload["attachment"] = [
             {
-                "filename": a["filename"],
-                "content": base64.b64encode(a["content"]).decode() if isinstance(a["content"], (bytes, bytearray)) else a["content"],
+                "name": a["filename"],
+                "content": base64.b64encode(a["content"]).decode()
+                if isinstance(a["content"], (bytes, bytearray))
+                else a["content"],
             }
             for a in attachments
         ]
+
+    headers = {
+        "api-key": os.environ["BREVO_API_KEY"],
+        "accept": "application/json",
+        "content-type": "application/json",
+    }
+
     try:
-        email = await asyncio.to_thread(resend.Emails.send, params)
-        eid = email.get("id") if isinstance(email, dict) else None
-        logger.info("[EMAIL sent] id=%s subject=%s to=%s", eid, subject, to)
-        return eid
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(BREVO_API_URL, json=payload, headers=headers)
+        if resp.status_code >= 400:
+            logger.error("[EMAIL error] Brevo %s: %s subject=%s to=%s",
+                         resp.status_code, resp.text, subject, to_list)
+            return None
+        data = resp.json() if resp.content else {}
+        mid = data.get("messageId") if isinstance(data, dict) else None
+        logger.info("[EMAIL sent] id=%s subject=%s to=%s", mid, subject, to_list)
+        return mid
     except Exception as e:
-        logger.error("[EMAIL error] %s subject=%s to=%s", e, subject, to)
+        logger.error("[EMAIL error] %s subject=%s to=%s", e, subject, to_list)
         return None
 
 
