@@ -9,6 +9,7 @@ import Dashboard from "@/pages/Dashboard";
 import Inventory from "@/pages/Inventory";
 import Events from "@/pages/Events";
 import EventDetail from "@/pages/EventDetail";
+import EventPrepare from "@/pages/EventPrepare";
 import Providers from "@/pages/Providers";
 import Packs from "@/pages/Packs";
 import Incidents from "@/pages/Incidents";
@@ -38,6 +39,7 @@ function App() {
               <Route path="/inventario" element={<Inventory />} />
               <Route path="/eventos" element={<Events />} />
               <Route path="/eventos/:id" element={<EventDetail />} />
+              <Route path="/eventos/:id/preparacion" element={<ProtectedRoute roles={["productor", "almacen"]}><EventPrepare /></ProtectedRoute>} />
               <Route path="/proveedores" element={<ProtectedRoute roles={["productor", "almacen"]}><Providers /></ProtectedRoute>} />
               <Route path="/packs" element={<ProtectedRoute roles={["productor", "almacen"]}><Packs /></ProtectedRoute>} />
               <Route path="/flightcases" element={<ProtectedRoute roles={["productor", "almacen"]}><Flightcases /></ProtectedRoute>} />

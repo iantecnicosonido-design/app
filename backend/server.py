@@ -1287,11 +1287,18 @@ class PrepSubstituteRequest(BaseModel):
     material_id: str
     old_unit_id: str
     new_unit_id: str
+    # Optional: when substituting across materials, target material of the new unit
+    new_material_id: Optional[str] = None
 
 
 class PrepRemoveRequest(BaseModel):
     material_id: str
     unit_id: str
+
+
+class PrepCheckBatchRequest(BaseModel):
+    unit_ids: List[str]
+    checked: bool
 
 
 def _is_almacen(user: dict) -> bool:
@@ -1336,48 +1343,140 @@ async def prep_substitute(eid: str, payload: PrepSubstituteRequest, user: dict =
     em = next((m for m in ev.get("materials", []) if m["material_id"] == payload.material_id), None)
     if not em:
         raise HTTPException(404, "Material no bloqueado en el evento")
-    # validate old/new units belong to same material
     old_u = await db.units.find_one({"id": payload.old_unit_id}, PROJ)
     new_u = await db.units.find_one({"id": payload.new_unit_id}, PROJ)
     if not old_u or not new_u:
         raise HTTPException(404, "Unidad no encontrada")
-    if old_u["material_id"] != payload.material_id or new_u["material_id"] != payload.material_id:
-        raise HTTPException(400, "Las unidades deben ser del mismo material")
-    # check new is available (not blocked elsewhere in overlapping events, not broken)
-    avail = await _compute_availability(eid, payload.material_id)
-    new_avail = next((u for u in avail["units"] if u["id"] == payload.new_unit_id), None)
-    if not new_avail or not new_avail["available"]:
-        raise HTTPException(400, f"Unidad {new_u['reference']} no disponible: {new_avail.get('reason') if new_avail else 'desconocido'}")
-    # replace in-place
-    units = list(em.get("units", []))
-    found = False
-    for i, u in enumerate(units):
-        if u["unit_id"] == payload.old_unit_id:
-            units[i] = {
-                **u,
-                "unit_id": new_u["id"],
-                "reference": new_u["reference"],
-                "subitems": new_u.get("subitems", []),
-            }
-            found = True
-            break
-    if not found:
-        raise HTTPException(404, "Unidad antigua no estaba bloqueada en este material")
-    # keep prep_checks but rename old → new if was checked
+    if old_u["material_id"] != payload.material_id:
+        raise HTTPException(400, "La unidad antigua no pertenece al material indicado")
+    # Determine target material for the new unit
+    target_mid = new_u["material_id"]
+    if payload.new_material_id and payload.new_material_id != target_mid:
+        raise HTTPException(400, "La nueva unidad no pertenece al material destino")
+    # Check the new unit is not already locked elsewhere (overlap), not broken, and not already in this event
+    cw = event_window(ev)
+    others = await db.events.find({"id": {"$ne": eid}}, PROJ).to_list(5000)
+    busy_ids: set = set()
+    for oev in others:
+        if overlaps(cw, event_window(oev)):
+            busy_ids |= event_unit_ids(oev)
+    if new_u["status"] != "available":
+        raise HTTPException(400, f"Unidad {new_u['reference']} en estado {new_u['status']}")
+    if new_u["id"] in busy_ids:
+        raise HTTPException(400, f"Unidad {new_u['reference']} solapa con otro evento")
+    self_ids = event_unit_ids(ev)
+    if new_u["id"] in self_ids:
+        raise HTTPException(400, f"Unidad {new_u['reference']} ya está bloqueada en este evento")
+
+    # --- Same-material in-place swap ---
+    if target_mid == payload.material_id:
+        units = list(em.get("units", []))
+        found = False
+        for i, u in enumerate(units):
+            if u["unit_id"] == payload.old_unit_id:
+                units[i] = {
+                    **u,
+                    "unit_id": new_u["id"],
+                    "reference": new_u["reference"],
+                    "subitems": new_u.get("subitems", []),
+                }
+                found = True
+                break
+        if not found:
+            raise HTTPException(404, "Unidad antigua no estaba bloqueada en este material")
+        checks = list(ev.get("prep_checks") or [])
+        if payload.old_unit_id in checks:
+            checks = [c if c != payload.old_unit_id else payload.new_unit_id for c in checks]
+        log = list(ev.get("prep_log") or [])
+        log.append(_prep_log_entry(
+            "substitute", user,
+            material_id=payload.material_id,
+            old_unit_id=payload.old_unit_id, old_reference=old_u["reference"],
+            new_unit_id=payload.new_unit_id, new_reference=new_u["reference"],
+        ))
+        await db.events.update_one(
+            {"id": eid, "materials.material_id": payload.material_id},
+            {"$set": {"materials.$.units": units, "prep_checks": checks, "prep_log": log}},
+        )
+        return await db.events.find_one({"id": eid}, PROJ)
+
+    # --- Cross-material substitution ---
+    # 1) Remove old unit from its material entry (pull or empty -> remove material)
+    new_old_units = [x for x in em.get("units", []) if x["unit_id"] != payload.old_unit_id]
+    if not new_old_units:
+        await db.events.update_one({"id": eid}, {"$pull": {"materials": {"material_id": payload.material_id}}})
+    else:
+        await db.events.update_one(
+            {"id": eid, "materials.material_id": payload.material_id},
+            {"$set": {"materials.$.units": new_old_units}},
+        )
+    # 2) Add new unit to its material entry (create entry if missing)
+    NewM = await db.materials.find_one({"id": target_mid}, PROJ)
+    if not NewM:
+        raise HTTPException(404, "Material destino no encontrado")
+    ev2 = await db.events.find_one({"id": eid}, PROJ)
+    existing_new = next((m for m in ev2.get("materials", []) if m["material_id"] == target_mid), None)
+    new_snap = {
+        "unit_id": new_u["id"],
+        "reference": new_u["reference"],
+        "subitems": new_u.get("subitems", []),
+        "flightcase": "",
+    }
+    if existing_new:
+        await db.events.update_one(
+            {"id": eid, "materials.material_id": target_mid},
+            {"$push": {"materials.$.units": new_snap}},
+        )
+    else:
+        em_new = EventMaterial(
+            material_id=target_mid,
+            name=NewM["name"],
+            category=NewM["category"],
+            reference=NewM.get("reference", ""),
+            units=[EventUnitSnapshot(**new_snap)],
+        )
+        await db.events.update_one({"id": eid}, {"$push": {"materials": em_new.model_dump()}})
+    # 3) Update prep_checks: drop old, keep checked state on new
     checks = list(ev.get("prep_checks") or [])
-    if payload.old_unit_id in checks:
-        checks = [c if c != payload.old_unit_id else payload.new_unit_id for c in checks]
+    was_checked = payload.old_unit_id in checks
+    checks = [c for c in checks if c != payload.old_unit_id]
+    if was_checked and payload.new_unit_id not in checks:
+        checks.append(payload.new_unit_id)
+    # 4) Log
     log = list(ev.get("prep_log") or [])
     log.append(_prep_log_entry(
         "substitute", user,
         material_id=payload.material_id,
         old_unit_id=payload.old_unit_id, old_reference=old_u["reference"],
+        new_material_id=target_mid,
         new_unit_id=payload.new_unit_id, new_reference=new_u["reference"],
     ))
-    await db.events.update_one(
-        {"id": eid, "materials.material_id": payload.material_id},
-        {"$set": {"materials.$.units": units, "prep_checks": checks, "prep_log": log}},
-    )
+    await db.events.update_one({"id": eid}, {"$set": {"prep_checks": checks, "prep_log": log}})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.post("/events/{eid}/prep/check-batch")
+async def prep_check_batch(eid: str, payload: PrepCheckBatchRequest, user: dict = Depends(get_current_user)):
+    _prep_locked_block_unless_almacen({}, user)
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("prep_status") == "preparado":
+        raise HTTPException(423, "Evento bloqueado. Desbloquea primero.")
+    checks = set(ev.get("prep_checks") or [])
+    log = list(ev.get("prep_log") or [])
+    changed = 0
+    for uid in payload.unit_ids:
+        if payload.checked and uid not in checks:
+            checks.add(uid)
+            changed += 1
+            log.append(_prep_log_entry("check", user, unit_id=uid))
+        elif not payload.checked and uid in checks:
+            checks.discard(uid)
+            changed += 1
+            log.append(_prep_log_entry("uncheck", user, unit_id=uid))
+    if changed:
+        await db.events.update_one({"id": eid}, {"$set": {"prep_checks": list(checks), "prep_log": log}})
     return await db.events.find_one({"id": eid}, PROJ)
 
 

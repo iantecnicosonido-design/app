@@ -32,6 +32,12 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
 - ✅ Gestión de usuarios desde UI (productor)
 - ✅ Asignación de técnicos a eventos; técnicos solo ven sus eventos
 - ✅ Reset password vía token (Resend email pendiente — token se loggea por ahora)
+- ✅ Hoja de Preparación de Almacén — página dedicada `/eventos/:id/preparacion` (Feb 2026)
+  - Layout tipo PDF, agrupado por categoría
+  - Cables agrupados por flightcase
+  - Checkboxes "marcar todas" a nivel material y a nivel flightcase
+  - Sustitución cruzada de material (buscador global de almacén, no solo misma referencia)
+  - Botón "Preparar" en cabecera de evento; lock/unlock por Almacén; estado read-only para resto de roles
 - ✅ Tests automatizados pasados (24/24 backend, 7/7 frontend)
 
 ## Backlog
@@ -48,5 +54,5 @@ App en español para controlar el stock de material de empresa de eventos (Ediso
 ## Key Files
 - `/app/backend/server.py`, `/app/backend/auth.py`, `/app/backend/seed_inventory.json`
 - `/app/frontend/src/App.js`, `/app/frontend/src/lib/{api,auth}.js`
-- `/app/frontend/src/pages/{Dashboard,Inventory,Events,EventDetail,Providers,Packs,Incidents,Timeline,Flightcases,Vehicles,Users,Login,ResetPassword}.jsx`
+- `/app/frontend/src/pages/{Dashboard,Inventory,Events,EventDetail,EventPrepare,Providers,Packs,Incidents,Timeline,Flightcases,Vehicles,Users,Login,ResetPassword}.jsx`
 - `/app/frontend/src/components/{Layout,SearchSelect}.jsx`
