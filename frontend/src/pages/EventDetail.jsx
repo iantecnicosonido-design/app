@@ -63,7 +63,7 @@ export default function EventDetail() {
   const [distMap, setDistMap] = useState({}); // {fc_name: qty}
   const [vehOpen, setVehOpen] = useState(false);
   const [vehAvail, setVehAvail] = useState([]);
-  const [vehForm, setVehForm] = useState({ type: "owned", vehicle_id: "", name: "", plate: "", notes: "" });
+  const [vehForm, setVehForm] = useState({ type: "owned", vehicle_id: "", name: "", plate: "", notes: "", reserved: false, pickup_dt: "", pickup_location: "", return_dt: "", return_location: "" });
   const [technicians, setTechnicians] = useState([]);
   const [techOpen, setTechOpen] = useState(false);
   const [techSel, setTechSel] = useState([]);
@@ -240,7 +240,7 @@ export default function EventDetail() {
       const r = await api.get(`/events/${id}/vehicle-availability`);
       setVehAvail(r.data);
     } catch { setVehAvail([]); }
-    setVehForm({ type: "owned", vehicle_id: "", name: "", plate: "", notes: "" });
+    setVehForm({ type: "owned", vehicle_id: "", name: "", plate: "", notes: "", reserved: false, pickup_dt: "", pickup_location: "", return_dt: "", return_location: "" });
     setVehOpen(true);
   };
 
@@ -736,17 +736,19 @@ export default function EventDetail() {
           <p style={{ color: "var(--ink-mute)", fontSize: 14 }}>Sin vehículos asignados.</p>
         ) : (
           (ev.vehicles || []).map((vh) => (
-            <div key={vh.id} className="row-hover" style={{ display: "grid", gridTemplateColumns: "120px 1fr 100px 60px", padding: "10px 4px", borderBottom: "1px solid var(--line)", alignItems: "center", gap: 8 }}>
-              <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>{vh.plate || "—"}</span>
-              <div>
-                <div style={{ fontWeight: 500 }}>{vh.name || "(sin nombre)"}</div>
-                {vh.notes && <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{vh.notes}</div>}
-              </div>
-              <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", padding: "3px 10px", borderRadius: 999, background: vh.type === "owned" ? "#dcfce7" : "#e0e7ff", color: vh.type === "owned" ? "#166534" : "#3730a3", textAlign: "center" }}>
-                {vh.type === "owned" ? "PROPIO" : "ALQUILER"}
-              </span>
-              <div style={{ textAlign: "right" }}>{canMaterial && !isClosed && <Button size="icon" variant="ghost" onClick={() => removeVehicle(vh.id)}><Trash2 size={14} /></Button>}</div>
-            </div>
+            <RentalVehicleRow
+              key={vh.id}
+              vh={vh}
+              canEdit={canMaterial && !isClosed}
+              onRemove={() => removeVehicle(vh.id)}
+              onPatch={async (body) => {
+                try {
+                  const r = await api.patch(`/events/${id}/vehicles/${vh.id}`, body);
+                  setEv(r.data);
+                  toast.success("Vehículo actualizado");
+                } catch (e) { toast.error(e.response?.data?.detail || "Error"); }
+              }}
+            />
           ))
         )}
       </div>
@@ -922,6 +924,26 @@ export default function EventDetail() {
                 <Lbl label="Matrícula (opcional)">
                   <Input value={vehForm.plate} onChange={(e) => setVehForm({ ...vehForm, plate: e.target.value.toUpperCase() })} data-testid="veh-rental-plate" />
                 </Lbl>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", border: "1px solid var(--line)", borderRadius: 6, background: vehForm.reserved ? "#dcfce7" : "#fafaf9" }}>
+                  <input type="checkbox" id="veh-reserved" checked={vehForm.reserved} onChange={(e) => setVehForm({ ...vehForm, reserved: e.target.checked })} data-testid="veh-rental-reserved" />
+                  <label htmlFor="veh-reserved" style={{ fontSize: 13, fontWeight: 600, cursor: "pointer", color: vehForm.reserved ? "#166534" : "var(--ink)" }}>
+                    {vehForm.reserved ? "✓ Reservada" : "Marcar como reservada"}
+                  </label>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <Lbl label="Recogida · cuándo">
+                    <Input type="datetime-local" value={vehForm.pickup_dt} onChange={(e) => setVehForm({ ...vehForm, pickup_dt: e.target.value })} data-testid="veh-rental-pickup-dt" />
+                  </Lbl>
+                  <Lbl label="Recogida · dónde">
+                    <Input value={vehForm.pickup_location} onChange={(e) => setVehForm({ ...vehForm, pickup_location: e.target.value })} placeholder="Ej: Sixt Madrid Centro" data-testid="veh-rental-pickup-loc" />
+                  </Lbl>
+                  <Lbl label="Devolución · cuándo">
+                    <Input type="datetime-local" value={vehForm.return_dt} onChange={(e) => setVehForm({ ...vehForm, return_dt: e.target.value })} data-testid="veh-rental-return-dt" />
+                  </Lbl>
+                  <Lbl label="Devolución · dónde">
+                    <Input value={vehForm.return_location} onChange={(e) => setVehForm({ ...vehForm, return_location: e.target.value })} placeholder="Ej: Sixt Aeropuerto T1" data-testid="veh-rental-return-loc" />
+                  </Lbl>
+                </div>
               </>
             )}
             <Lbl label="Notas"><Textarea rows={2} value={vehForm.notes} onChange={(e) => setVehForm({ ...vehForm, notes: e.target.value })} /></Lbl>
@@ -1432,6 +1454,100 @@ function DeliveryReturnPanel({ ev }) {
           </div>
           <div style={{ marginTop: 10 }}>
             {ev.check_info.doc_file_id && <Button size="sm" variant="outline" onClick={() => openFile(ev.check_info.doc_file_id)} data-testid="open-check-pdf"><FileDown size={14} /> PDF comprobación (interno)</Button>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+function RentalVehicleRow({ vh, canEdit, onRemove, onPatch }) {
+  const isRental = vh.type === "rental";
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({
+    pickup_dt: vh.pickup_dt || "",
+    pickup_location: vh.pickup_location || "",
+    return_dt: vh.return_dt || "",
+    return_location: vh.return_location || "",
+    notes: vh.notes || "",
+  });
+  // Resync form when vh prop changes (after PATCH)
+  useEffect(() => {
+    setForm({
+      pickup_dt: vh.pickup_dt || "",
+      pickup_location: vh.pickup_location || "",
+      return_dt: vh.return_dt || "",
+      return_location: vh.return_location || "",
+      notes: vh.notes || "",
+    });
+  }, [vh]);
+
+  const fmtDt = (s) => s ? new Date(s).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+
+  return (
+    <div className="row-hover" style={{ padding: "10px 4px", borderBottom: "1px solid var(--line)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr auto auto auto", alignItems: "center", gap: 8 }}>
+        <span style={{ fontFamily: "JetBrains Mono, monospace", fontSize: 13, color: "var(--accent)", fontWeight: 600 }}>{vh.plate || "—"}</span>
+        <div>
+          <div style={{ fontWeight: 500 }}>{vh.name || "(sin nombre)"}</div>
+          {vh.notes && <div style={{ fontSize: 12, color: "var(--ink-mute)" }}>{vh.notes}</div>}
+        </div>
+        {isRental && (
+          <button
+            type="button"
+            onClick={() => canEdit && onPatch({ reserved: !vh.reserved })}
+            disabled={!canEdit}
+            data-testid={`veh-reserved-toggle-${vh.id}`}
+            style={{
+              fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.06em",
+              padding: "5px 12px", borderRadius: 999, fontWeight: 700, cursor: canEdit ? "pointer" : "default",
+              background: vh.reserved ? "#166534" : "#fee2e2",
+              color: vh.reserved ? "#fff" : "#991b1b",
+              border: "none",
+            }}
+            title={canEdit ? "Click para cambiar estado" : ""}
+          >
+            {vh.reserved ? "✓ RESERVADA" : "SIN RESERVA"}
+          </button>
+        )}
+        <span style={{ fontSize: 10, fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", padding: "3px 10px", borderRadius: 999, background: vh.type === "owned" ? "#dcfce7" : "#e0e7ff", color: vh.type === "owned" ? "#166534" : "#3730a3", textAlign: "center" }}>
+          {vh.type === "owned" ? "PROPIO" : "ALQUILER"}
+        </span>
+        <div style={{ display: "flex", gap: 2 }}>
+          {isRental && canEdit && (
+            <Button size="icon" variant="ghost" onClick={() => setOpen((o) => !o)} title="Editar recogida/devolución" data-testid={`veh-edit-${vh.id}`}>
+              <Pencil size={14} />
+            </Button>
+          )}
+          {canEdit && <Button size="icon" variant="ghost" onClick={onRemove}><Trash2 size={14} /></Button>}
+        </div>
+      </div>
+
+      {/* Pickup/return summary line for rentals */}
+      {isRental && (vh.pickup_dt || vh.pickup_location || vh.return_dt || vh.return_location) && !open && (
+        <div style={{ marginTop: 6, paddingLeft: 128, fontSize: 12, color: "var(--ink-mute)", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          <div><b style={{ color: "var(--ink)", fontWeight: 600 }}>Recoge:</b> {fmtDt(vh.pickup_dt)}{vh.pickup_location ? ` · ${vh.pickup_location}` : ""}</div>
+          <div><b style={{ color: "var(--ink)", fontWeight: 600 }}>Devuelve:</b> {fmtDt(vh.return_dt)}{vh.return_location ? ` · ${vh.return_location}` : ""}</div>
+        </div>
+      )}
+
+      {/* Inline edit panel */}
+      {open && isRental && (
+        <div style={{ marginTop: 10, padding: 12, background: "#fafaf9", border: "1px solid var(--line)", borderRadius: 6, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Lbl label="Recogida · cuándo"><Input type="datetime-local" value={form.pickup_dt} onChange={(e) => setForm({ ...form, pickup_dt: e.target.value })} data-testid={`veh-pickup-dt-${vh.id}`} /></Lbl>
+          <Lbl label="Recogida · dónde"><Input value={form.pickup_location} onChange={(e) => setForm({ ...form, pickup_location: e.target.value })} placeholder="Ej: Sixt Madrid Centro" data-testid={`veh-pickup-loc-${vh.id}`} /></Lbl>
+          <Lbl label="Devolución · cuándo"><Input type="datetime-local" value={form.return_dt} onChange={(e) => setForm({ ...form, return_dt: e.target.value })} data-testid={`veh-return-dt-${vh.id}`} /></Lbl>
+          <Lbl label="Devolución · dónde"><Input value={form.return_location} onChange={(e) => setForm({ ...form, return_location: e.target.value })} placeholder="Ej: Sixt Aeropuerto T1" data-testid={`veh-return-loc-${vh.id}`} /></Lbl>
+          <div style={{ gridColumn: "1 / span 2" }}>
+            <Lbl label="Notas"><Textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} data-testid={`veh-notes-${vh.id}`} /></Lbl>
+          </div>
+          <div style={{ gridColumn: "1 / span 2", display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>Cancelar</Button>
+            <Button size="sm" style={{ background: "var(--accent)" }} onClick={async () => { await onPatch(form); setOpen(false); }} data-testid={`veh-save-${vh.id}`}>
+              <Save size={13} /> Guardar
+            </Button>
           </div>
         </div>
       )}

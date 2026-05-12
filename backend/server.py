@@ -262,6 +262,12 @@ class EventVehicle(BaseModel):
     name: str = ""
     plate: str = ""
     notes: str = ""
+    # rental-only: gestión de reserva del alquiler
+    reserved: bool = False
+    pickup_dt: Optional[str] = None      # cuándo se recoge
+    pickup_location: str = ""            # dónde se recoge
+    return_dt: Optional[str] = None      # cuándo se devuelve
+    return_location: str = ""            # dónde se devuelve
 
 
 class ExpenseFile(BaseModel):
@@ -468,6 +474,22 @@ class EventVehicleAdd(BaseModel):
     name: str = ""
     plate: str = ""
     notes: str = ""
+    # rental-only
+    reserved: bool = False
+    pickup_dt: Optional[str] = None
+    pickup_location: str = ""
+    return_dt: Optional[str] = None
+    return_location: str = ""
+
+
+class EventRentalVehicleUpdate(BaseModel):
+    """Actualización de los datos de reserva de un vehículo de alquiler en un evento."""
+    reserved: Optional[bool] = None
+    pickup_dt: Optional[str] = None
+    pickup_location: Optional[str] = None
+    return_dt: Optional[str] = None
+    return_location: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class IncidentCreate(BaseModel):
@@ -1587,8 +1609,51 @@ async def add_event_vehicle(eid: str, payload: EventVehicleAdd, user: dict = Dep
     else:
         if not payload.name.strip():
             raise HTTPException(400, "Nombre del vehículo de alquiler obligatorio")
-        item = EventVehicle(type="rental", name=payload.name.strip(), plate=payload.plate.strip().upper(), notes=payload.notes)
+        item = EventVehicle(
+            type="rental",
+            name=payload.name.strip(),
+            plate=payload.plate.strip().upper(),
+            notes=payload.notes,
+            reserved=payload.reserved,
+            pickup_dt=payload.pickup_dt,
+            pickup_location=(payload.pickup_location or "").strip(),
+            return_dt=payload.return_dt,
+            return_location=(payload.return_location or "").strip(),
+        )
     await db.events.update_one({"id": eid}, {"$push": {"vehicles": item.model_dump()}})
+    return await db.events.find_one({"id": eid}, PROJ)
+
+
+@api_router.patch("/events/{eid}/vehicles/{vid}")
+async def update_event_rental_vehicle(eid: str, vid: str, payload: EventRentalVehicleUpdate, user: dict = Depends(require_warehouse)):
+    """Actualiza los campos de un vehículo de alquiler (reserved, pickup/return dt+location, notes).
+    No aplica a vehículos propios (owned)."""
+    await _assert_event_modifiable(eid, user)
+    ev = await db.events.find_one({"id": eid}, PROJ)
+    if not ev:
+        raise HTTPException(404, "Event not found")
+    if ev.get("status") == "cerrado":
+        raise HTTPException(400, "Evento cerrado")
+    target = next((v for v in (ev.get("vehicles") or []) if v.get("id") == vid), None)
+    if not target:
+        raise HTTPException(404, "Vehículo no encontrado en el evento")
+    if target.get("type") != "rental":
+        raise HTTPException(400, "Solo aplicable a vehículos de alquiler")
+    upd: Dict[str, Any] = {}
+    if payload.reserved is not None:
+        upd["vehicles.$.reserved"] = bool(payload.reserved)
+    if payload.pickup_dt is not None:
+        upd["vehicles.$.pickup_dt"] = payload.pickup_dt or None
+    if payload.pickup_location is not None:
+        upd["vehicles.$.pickup_location"] = payload.pickup_location.strip()
+    if payload.return_dt is not None:
+        upd["vehicles.$.return_dt"] = payload.return_dt or None
+    if payload.return_location is not None:
+        upd["vehicles.$.return_location"] = payload.return_location.strip()
+    if payload.notes is not None:
+        upd["vehicles.$.notes"] = payload.notes
+    if upd:
+        await db.events.update_one({"id": eid, "vehicles.id": vid}, {"$set": upd})
     return await db.events.find_one({"id": eid}, PROJ)
 
 
