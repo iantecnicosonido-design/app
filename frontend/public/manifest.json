@@ -1,0 +1,70 @@
+{
+  "name": "Edison Rent · Control de material",
+  "short_name": "Edison Rent",
+  "description": "Gestión de stock, eventos, incidencias y técnicos de Edison Rent.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fafaf7",
+  "theme_color": "#1c1917",
+  "lang": "es-ES",
+  "dir": "ltr",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/favicon-32x32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Eventos",
+      "short_name": "Eventos",
+      "url": "/eventos",
+      "description": "Ver calendario de eventos"
+    },
+    {
+      "name": "Incidencias",
+      "short_name": "Incidencias",
+      "url": "/incidencias",
+      "description": "Cola de trabajo del taller"
+    },
+    {
+      "name": "Inventario",
+      "short_name": "Inventario",
+      "url": "/inventario",
+      "description": "Stock de material"
+    }
+  ]
+}
