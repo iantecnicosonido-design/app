@@ -47,7 +47,7 @@ export default function Login() {
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <img src="/logo.png" alt="Edison Rent" style={{ height: 96, marginBottom: 16, display: "inline-block" }} />
           <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}>Edison Rent</h1>
-          <p style={{ fontSize: 12, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.1em", margin: "6px 0 0 0" }}>Control de material</p>
+          <p style={{ fontSize: 12, color: "var(--ink-mute)", fontFamily: "JetBrains Mono, monospace", textTransform: "uppercase", letterSpacing: "0.1em", margin: "6px 0 0 0" }}>App de control</p>
         </div>
         <form onSubmit={forgot ? submitForgot : submit} className="card-paper" style={{ padding: 28 }}>
           <h2 style={{ margin: "0 0 18px 0", fontSize: 18, fontWeight: 600 }}>{forgot ? "Recuperar contraseña" : "Iniciar sesión"}</h2>
